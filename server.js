@@ -291,7 +291,8 @@ app.use('/uploads', requerirAdmin, express.static(uploadDir));
 app.post('/api/auth/register', async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   const correo = String(req.body?.correo || '').trim().toLowerCase();
-  const telefono = normalizarTelefono(req.body?.telefono);
+  const telefonoRaw = String(req.body?.telefono || '').trim();
+  const telefono = telefonoRaw ? normalizarTelefono(telefonoRaw) : '';
   const password = String(req.body?.password || '');
   const confirmarPassword = String(req.body?.confirmarPassword || '');
 
@@ -301,8 +302,8 @@ app.post('/api/auth/register', async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) || correo.length > 150) {
     return res.status(400).json({ ok: false, error: 'Ingrese un correo válido' });
   }
-  if (telefono.length < 8 || telefono.length > 15) {
-    return res.status(400).json({ ok: false, error: 'Ingrese un número de teléfono válido (8 a 15 dígitos)' });
+  if (telefonoRaw && (telefono.length < 8 || telefono.length > 15)) {
+    return res.status(400).json({ ok: false, error: 'Si captura un número de teléfono, debe tener entre 8 y 15 dígitos' });
   }
   if (password.length < 6) {
     return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres' });
@@ -316,7 +317,12 @@ app.post('/api/auth/register', async (req, res) => {
     const existe = await pool.request()
       .input('Correo', sql.VarChar(150), correo)
       .input('Telefono', sql.VarChar(20), telefono)
-      .query('SELECT IdUsuario, Correo, Telefono FROM Usuarios WHERE Correo = @Correo OR Telefono = @Telefono');
+      .query(`
+        SELECT IdUsuario, Correo, Telefono
+        FROM Usuarios
+        WHERE Correo = @Correo
+           OR (@Telefono <> '' AND Telefono = @Telefono)
+      `);
 
     if (existe.recordset.length > 0) {
       const duplicado = existe.recordset[0];
@@ -331,7 +337,7 @@ app.post('/api/auth/register', async (req, res) => {
     const ins = await pool.request()
       .input('Nombre', sql.VarChar(120), nombre)
       .input('Correo', sql.VarChar(150), correo)
-      .input('Telefono', sql.VarChar(20), telefono)
+      .input('Telefono', sql.VarChar(20), telefono || null)
       .input('PasswordHash', sql.VarChar(255), passwordHash)
       .input('Estado', sql.VarChar(20), 'activo')
       .input('EsAdmin', sql.Bit, esAdminInicial)

@@ -38,7 +38,7 @@
       <form id="formLogin">
         <h2>Iniciar sesión</h2>
         <label for="loginIdentificador">Correo electrónico o número de teléfono</label>
-        <input type="text" id="loginIdentificador" name="identificador" placeholder="correo@ejemplo.com o 8112345678" required autocomplete="username">
+        <input type="text" id="loginIdentificador" name="identificador" required autocomplete="username">
 
         <label for="loginPassword">Contraseña</label>
         <div class="password-container">
@@ -57,8 +57,11 @@
         <label for="regCorreo">Correo electrónico</label>
         <input type="email" id="regCorreo" name="correo" required autocomplete="email">
 
-        <label for="regTelefono">Número de teléfono</label>
-        <input type="text" id="regTelefono" name="telefono" placeholder="Ej. 8112345678" required autocomplete="tel">
+        <label for="regTelefono">Número de teléfono (opcional)</label>
+        <input type="text" id="regTelefono" name="telefono" autocomplete="tel">
+        <small style="display:block;color:#475569;font-size:13px;line-height:1.45;margin-top:-4px;margin-bottom:6px;">
+          El número de teléfono nos servirá como segunda opción de contacto en caso de que no sea posible comunicarnos con usted por correo electrónico.
+        </small>
 
         <label for="regPassword">Contraseña (mínimo 6 caracteres)</label>
         <div class="password-container">
