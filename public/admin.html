@@ -62,11 +62,11 @@
         </div>
       </div>
 
-      <section>
+      <section id="seccionExpedientes">
         <div class="admin-toolbar">
           <h2>Expedientes y archivos subidos</h2>
           <div class="toolbar-actions">
-            <input type="text" id="filtroTexto" placeholder="Buscar por expediente, archivo o correo...">
+            <input type="text" id="filtroTexto" placeholder="Buscar por expediente, archivo, correo o nota...">
             <select id="filtroEstatus">
               <option value="">Todos los estatus</option>
               <option value="En revisión">En revisión</option>
@@ -78,6 +78,7 @@
               <option value="activo">Usuarios activos</option>
               <option value="baneado">Usuarios baneados</option>
             </select>
+            <button type="button" class="btn-secondary" id="btnLimpiarExp">Limpiar</button>
           </div>
         </div>
 
@@ -90,6 +91,7 @@
               <th>Usuario que subió</th>
               <th>Estado usuario</th>
               <th>Estatus</th>
+              <th>Observación / Motivo</th>
               <th>Fecha</th>
               <th>Acciones</th>
             </tr>
@@ -108,6 +110,7 @@
               <option value="admin">Solo Admin</option>
               <option value="usuario">Solo Usuario</option>
             </select>
+            <button type="button" class="btn-secondary" id="btnLimpiarUsr">Limpiar</button>
           </div>
         </div>
 
@@ -117,6 +120,7 @@
               <th>ID</th>
               <th>Nombre</th>
               <th>Correo</th>
+              <th>Envíos</th>
               <th>Estado</th>
               <th>Rol</th>
               <th>Registro</th>
@@ -128,6 +132,37 @@
       </section>
     </section>
   </main>
+
+  <div id="modalConfirmar" class="modal" style="display:none;">
+    <div class="modal-content small">
+      <span class="close" id="cerrarModalConfirmar">&times;</span>
+      <h2 id="confirmarTitulo">Confirmar acción</h2>
+      <p class="section-desc" id="confirmarTexto"></p>
+      <div class="modal-actions">
+        <button type="button" id="btnConfirmarAceptar">Confirmar</button>
+        <button type="button" class="btn-secondary" id="btnConfirmarCancelar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modalContacto" class="modal" style="display:none;">
+    <div class="modal-content small">
+      <span class="close" id="cerrarModalContacto">&times;</span>
+      <h2>Contactar usuario</h2>
+      <p class="section-desc" id="contactoDestino"></p>
+
+      <label for="contactoAsunto">Asunto</label>
+      <input type="text" id="contactoAsunto">
+
+      <label for="contactoCuerpo" style="margin-top:12px;">Mensaje sugerido</label>
+      <input type="text" id="contactoCuerpo">
+
+      <div class="modal-actions">
+        <button type="button" id="btnAbrirCorreo">Abrir correo</button>
+        <button type="button" class="btn-secondary" id="btnCopiarCorreo">Copiar correo</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     const TOKEN_KEY = 'serlg_user_token';
@@ -143,6 +178,7 @@
     const tablaUsuarios = document.getElementById('tablaUsuarios');
     const btnToggleModalPass = document.getElementById('btnToggleModalPass');
     const adminPassInput = document.getElementById('adminPass');
+    const seccionExpedientes = document.getElementById('seccionExpedientes');
 
     const kpiTotal = document.getElementById('kpiTotal');
     const kpiRevision = document.getElementById('kpiRevision');
@@ -152,11 +188,31 @@
     const filtroTexto = document.getElementById('filtroTexto');
     const filtroEstatus = document.getElementById('filtroEstatus');
     const filtroUsuarioEstado = document.getElementById('filtroUsuarioEstado');
+    const btnLimpiarExp = document.getElementById('btnLimpiarExp');
+
     const filtroUsuariosTexto = document.getElementById('filtroUsuariosTexto');
     const filtroUsuariosRol = document.getElementById('filtroUsuariosRol');
+    const btnLimpiarUsr = document.getElementById('btnLimpiarUsr');
+
+    const modalConfirmar = document.getElementById('modalConfirmar');
+    const cerrarModalConfirmar = document.getElementById('cerrarModalConfirmar');
+    const confirmarTitulo = document.getElementById('confirmarTitulo');
+    const confirmarTexto = document.getElementById('confirmarTexto');
+    const btnConfirmarAceptar = document.getElementById('btnConfirmarAceptar');
+    const btnConfirmarCancelar = document.getElementById('btnConfirmarCancelar');
+
+    const modalContacto = document.getElementById('modalContacto');
+    const cerrarModalContacto = document.getElementById('cerrarModalContacto');
+    const contactoDestino = document.getElementById('contactoDestino');
+    const contactoAsunto = document.getElementById('contactoAsunto');
+    const contactoCuerpo = document.getElementById('contactoCuerpo');
+    const btnAbrirCorreo = document.getElementById('btnAbrirCorreo');
+    const btnCopiarCorreo = document.getElementById('btnCopiarCorreo');
 
     let expedientesCache = [];
     let usuariosCache = [];
+    let accionPendiente = null;
+    let correoContactoActual = '';
 
     if (btnToggleModalPass && adminPassInput) {
       btnToggleModalPass.addEventListener('click', () => {
@@ -195,6 +251,32 @@
       };
     }
 
+    function abrirConfirmacion(titulo, texto, callback) {
+      confirmarTitulo.textContent = titulo;
+      confirmarTexto.textContent = texto;
+      accionPendiente = callback;
+      modalConfirmar.style.display = 'flex';
+    }
+
+    function cerrarConfirmacion() {
+      modalConfirmar.style.display = 'none';
+      accionPendiente = null;
+    }
+
+    cerrarModalConfirmar.addEventListener('click', cerrarConfirmacion);
+    btnConfirmarCancelar.addEventListener('click', cerrarConfirmacion);
+    modalConfirmar.addEventListener('click', (e) => {
+      if (e.target === modalConfirmar) cerrarConfirmacion();
+    });
+
+    btnConfirmarAceptar.addEventListener('click', async () => {
+      const fn = accionPendiente;
+      cerrarConfirmacion();
+      if (typeof fn === 'function') {
+        await fn();
+      }
+    });
+
     function actualizarKPIs() {
       const total = expedientesCache.length;
       const revision = expedientesCache.filter((x) => (x.Estatus || 'En revisión') === 'En revisión').length;
@@ -206,6 +288,50 @@
       kpiAprobados.textContent = aprobados;
       kpiRechazados.textContent = rechazados;
     }
+
+    function abrirModalContacto(item) {
+      if (!item || !item.CorreoUsuario) {
+        mostrarAdminMensaje('Este expediente no tiene correo de usuario registrado.', true);
+        return;
+      }
+      correoContactoActual = item.CorreoUsuario;
+      const obsInput = tablaExpedientes.querySelector(`input[data-obs-input="${item.IdCandidato}"]`);
+      const obsActual = obsInput ? obsInput.value.trim() : (item.ObservacionAdmin || '');
+
+      contactoDestino.textContent = `Para: ${item.NombreUsuario || ''} <${item.CorreoUsuario}> — Folio #${item.IdCandidato}`;
+      contactoAsunto.value = `SER-LG | Observación en expediente #${item.IdCandidato}`;
+      contactoCuerpo.value = obsActual
+        ? `Hola ${item.NombreUsuario || ''}, respecto a su archivo "${item.NombreOriginal || ''}": ${obsActual}`
+        : `Hola ${item.NombreUsuario || ''}, favor de revisar su archivo "${item.NombreOriginal || ''}" ya que presenta observaciones o falta información.`;
+
+      modalContacto.style.display = 'flex';
+    }
+
+    cerrarModalContacto.addEventListener('click', () => {
+      modalContacto.style.display = 'none';
+    });
+
+    modalContacto.addEventListener('click', (e) => {
+      if (e.target === modalContacto) {
+        modalContacto.style.display = 'none';
+      }
+    });
+
+    btnAbrirCorreo.addEventListener('click', () => {
+      if (!correoContactoActual) return;
+      const mailto = `mailto:${encodeURIComponent(correoContactoActual)}?subject=${encodeURIComponent(contactoAsunto.value.trim())}&body=${encodeURIComponent(contactoCuerpo.value.trim())}`;
+      window.location.href = mailto;
+    });
+
+    btnCopiarCorreo.addEventListener('click', async () => {
+      if (!correoContactoActual) return;
+      try {
+        await navigator.clipboard.writeText(correoContactoActual);
+        mostrarAdminMensaje(`Correo copiado: ${correoContactoActual}`, false);
+      } catch {
+        mostrarAdminMensaje(`Correo: ${correoContactoActual}`, false);
+      }
+    });
 
     function renderizarExpedientes() {
       const q = filtroTexto.value.trim().toLowerCase();
@@ -225,7 +351,8 @@
             item.Nombre,
             item.NombreOriginal,
             item.NombreUsuario,
-            item.CorreoUsuario
+            item.CorreoUsuario,
+            item.ObservacionAdmin
           ]
             .filter(Boolean)
             .join(' ')
@@ -238,7 +365,7 @@
       tablaExpedientes.innerHTML = '';
 
       if (filtrados.length === 0) {
-        tablaExpedientes.innerHTML = '<tr><td colspan="8">No hay expedientes que coincidan con el filtro.</td></tr>';
+        tablaExpedientes.innerHTML = '<tr><td colspan="9">No hay expedientes que coincidan con el filtro.</td></tr>';
         return;
       }
 
@@ -263,10 +390,15 @@
               <option value="Rechazado" ${estatusActual === 'Rechazado' ? 'selected' : ''}>Rechazado</option>
             </select>
           </td>
+          <td>
+            <input type="text" data-obs-input="${item.IdCandidato}" value="${escapeHtml(item.ObservacionAdmin || '')}" placeholder="Ej. Falta firma o ilegible...">
+            <button type="button" data-save-obs="${item.IdCandidato}">Guardar</button>
+          </td>
           <td>${escapeHtml(item.FechaFormateada || '')}</td>
           <td>
             <button type="button" data-ver-id="${item.IdCandidato}">Ver</button>
-            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
+            ${item.CorreoUsuario ? `<button type="button" data-contact-id="${item.IdCandidato}">Contactar</button>` : ''}
+            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-correo="${escapeHtml(item.CorreoUsuario || '')}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
             <button type="button" data-del-id="${item.IdCandidato}">Eliminar</button>
           </td>
         `;
@@ -294,7 +426,7 @@
       tablaUsuarios.innerHTML = '';
 
       if (filtrados.length === 0) {
-        tablaUsuarios.innerHTML = '<tr><td colspan="7">No hay usuarios que coincidan con el filtro.</td></tr>';
+        tablaUsuarios.innerHTML = '<tr><td colspan="8">No hay usuarios que coincidan con el filtro.</td></tr>';
         return;
       }
 
@@ -303,17 +435,20 @@
         const estaBaneado = u.Estado === 'baneado';
         const esAdmin = Boolean(u.EsAdmin);
         const esMiCuenta = actual && actual.idUsuario === u.IdUsuario;
+        const totalEnvios = Number(u.TotalEnvios || 0);
 
         tr.innerHTML = `
           <td>${u.IdUsuario}</td>
           <td>${escapeHtml(u.Nombre)}</td>
           <td>${escapeHtml(u.Correo)}</td>
+          <td>${totalEnvios}</td>
           <td>${escapeHtml(u.Estado)}</td>
           <td>${esAdmin ? 'Admin' : 'Usuario'}</td>
           <td>${escapeHtml(u.FechaFormateada || '')}</td>
           <td>
-            ${!esMiCuenta ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>` : ''}
-            ${!esMiCuenta ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>` : '<span>Cuenta actual</span>'}
+            <button type="button" data-ver-envios="${escapeHtml(u.Correo)}">Ver envíos</button>
+            ${!esMiCuenta ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-correo="${escapeHtml(u.Correo)}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>` : ''}
+            ${!esMiCuenta ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-correo="${escapeHtml(u.Correo)}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>` : '<span>Cuenta actual</span>'}
           </td>
         `;
         tablaUsuarios.appendChild(tr);
@@ -373,8 +508,22 @@
     filtroTexto.addEventListener('input', renderizarExpedientes);
     filtroEstatus.addEventListener('change', renderizarExpedientes);
     filtroUsuarioEstado.addEventListener('change', renderizarExpedientes);
+
+    btnLimpiarExp.addEventListener('click', () => {
+      filtroTexto.value = '';
+      filtroEstatus.value = '';
+      filtroUsuarioEstado.value = '';
+      renderizarExpedientes();
+    });
+
     filtroUsuariosTexto.addEventListener('input', renderizarUsuarios);
     filtroUsuariosRol.addEventListener('change', renderizarUsuarios);
+
+    btnLimpiarUsr.addEventListener('click', () => {
+      filtroUsuariosTexto.value = '';
+      filtroUsuariosRol.value = '';
+      renderizarUsuarios();
+    });
 
     formAdminLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -447,6 +596,46 @@
     });
 
     document.addEventListener('click', async (e) => {
+      const verEnviosBtn = e.target.closest('button[data-ver-envios]');
+      if (verEnviosBtn) {
+        const correo = verEnviosBtn.getAttribute('data-ver-envios') || '';
+        filtroTexto.value = correo;
+        filtroEstatus.value = '';
+        filtroUsuarioEstado.value = '';
+        renderizarExpedientes();
+        seccionExpedientes.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+
+      const saveObsBtn = e.target.closest('button[data-save-obs]');
+      if (saveObsBtn) {
+        const id = Number(saveObsBtn.getAttribute('data-save-obs'));
+        const input = tablaExpedientes.querySelector(`input[data-obs-input="${id}"]`);
+        const observacion = input ? input.value.trim() : '';
+        const res = await fetch(`/api/candidatos/${id}/observacion`, {
+          method: 'PUT',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ observacion })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          const item = expedientesCache.find((x) => x.IdCandidato === id);
+          if (item) item.ObservacionAdmin = observacion;
+          mostrarAdminMensaje('Observación guardada.', false);
+        } else {
+          mostrarAdminMensaje(data.error || 'No se pudo guardar la observación.', true);
+        }
+        return;
+      }
+
+      const contactBtn = e.target.closest('button[data-contact-id]');
+      if (contactBtn) {
+        const id = Number(contactBtn.getAttribute('data-contact-id'));
+        const item = expedientesCache.find((x) => x.IdCandidato === id);
+        abrirModalContacto(item);
+        return;
+      }
+
       const verBtn = e.target.closest('button[data-ver-id]');
       if (verBtn) {
         const id = verBtn.getAttribute('data-ver-id');
@@ -466,59 +655,87 @@
       const banBtn = e.target.closest('button[data-ban-user]');
       if (banBtn) {
         const idUsuario = banBtn.getAttribute('data-ban-user');
+        const correoUsr = banBtn.getAttribute('data-ban-correo') || `ID #${idUsuario}`;
         const nuevoEstado = banBtn.getAttribute('data-ban-estado');
-        const res = await fetch(`/api/usuarios/${idUsuario}/estado`, {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ estado: nuevoEstado })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) {
-          mostrarAdminMensaje(`Usuario actualizado a: ${nuevoEstado}.`, false);
-          await Promise.all([cargarExpedientes(), cargarUsuarios()]);
-        } else {
-          mostrarAdminMensaje(data.error || 'Error al cambiar estado del usuario.', true);
-        }
+        const esBaneo = nuevoEstado === 'baneado';
+
+        abrirConfirmacion(
+          esBaneo ? 'Banear cuenta de usuario' : 'Reactivar cuenta de usuario',
+          esBaneo
+            ? `¿Deseas banear la cuenta de ${correoUsr}? No podrá iniciar sesión ni subir archivos.`
+            : `¿Deseas reactivar la cuenta de ${correoUsr}?`,
+          async () => {
+            const res = await fetch(`/api/usuarios/${idUsuario}/estado`, {
+              method: 'PUT',
+              headers: authHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ estado: nuevoEstado })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+              mostrarAdminMensaje(`Usuario actualizado a: ${nuevoEstado}.`, false);
+              await Promise.all([cargarExpedientes(), cargarUsuarios()]);
+            } else {
+              mostrarAdminMensaje(data.error || 'Error al cambiar estado del usuario.', true);
+            }
+          }
+        );
         return;
       }
 
       const adminBtn = e.target.closest('button[data-admin-user]');
       if (adminBtn) {
         const idUsuario = adminBtn.getAttribute('data-admin-user');
+        const correoUsr = adminBtn.getAttribute('data-admin-correo') || `ID #${idUsuario}`;
         const nuevoAdmin = adminBtn.getAttribute('data-admin-valor') === 'true';
-        const res = await fetch(`/api/usuarios/${idUsuario}/admin`, {
-          method: 'PUT',
-          headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ esAdmin: nuevoAdmin })
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.ok) {
-          mostrarAdminMensaje(
-            nuevoAdmin ? 'Permiso de administrador concedido.' : 'Permiso de administrador revocado.',
-            false
-          );
-          await cargarUsuarios();
-        } else {
-          mostrarAdminMensaje(data.error || 'Error al cambiar permiso de administrador.', true);
-        }
+
+        abrirConfirmacion(
+          nuevoAdmin ? 'Otorgar permiso de administrador' : 'Quitar permiso de administrador',
+          nuevoAdmin
+            ? `¿Deseas dar permisos de administrador a ${correoUsr}?`
+            : `¿Deseas quitar los permisos de administrador a ${correoUsr}?`,
+          async () => {
+            const res = await fetch(`/api/usuarios/${idUsuario}/admin`, {
+              method: 'PUT',
+              headers: authHeaders({ 'Content-Type': 'application/json' }),
+              body: JSON.stringify({ esAdmin: nuevoAdmin })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+              mostrarAdminMensaje(
+                nuevoAdmin ? 'Permiso de administrador concedido.' : 'Permiso de administrador revocado.',
+                false
+              );
+              await cargarUsuarios();
+            } else {
+              mostrarAdminMensaje(data.error || 'Error al cambiar permiso de administrador.', true);
+            }
+          }
+        );
         return;
       }
 
       const delBtn = e.target.closest('button[data-del-id]');
       if (delBtn) {
         const id = Number(delBtn.getAttribute('data-del-id'));
-        const res = await fetch(`/api/candidatos/${id}`, {
-          method: 'DELETE',
-          headers: authHeaders()
-        });
-        if (res.ok) {
-          expedientesCache = expedientesCache.filter((x) => x.IdCandidato !== id);
-          actualizarKPIs();
-          renderizarExpedientes();
-          mostrarAdminMensaje('Expediente eliminado.', false);
-        } else {
-          mostrarAdminMensaje('Error al eliminar expediente.', true);
-        }
+        abrirConfirmacion(
+          'Eliminar expediente',
+          `¿Deseas eliminar permanentemente el expediente #${id} y su archivo adjunto?`,
+          async () => {
+            const res = await fetch(`/api/candidatos/${id}`, {
+              method: 'DELETE',
+              headers: authHeaders()
+            });
+            if (res.ok) {
+              expedientesCache = expedientesCache.filter((x) => x.IdCandidato !== id);
+              actualizarKPIs();
+              renderizarExpedientes();
+              await cargarUsuarios();
+              mostrarAdminMensaje('Expediente eliminado.', false);
+            } else {
+              mostrarAdminMensaje('Error al eliminar expediente.', true);
+            }
+          }
+        );
       }
     });
 

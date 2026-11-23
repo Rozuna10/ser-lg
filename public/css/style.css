@@ -580,6 +580,12 @@ button:active, .btn-lg-submit:active, .btn-excel:active {
   flex-wrap: wrap;
 }
 
+.toolbar-actions .btn-secondary {
+  width: auto;
+  padding: 10px 16px;
+  font-size: 14px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -633,6 +639,13 @@ select:hover, select:focus {
   box-shadow: var(--focus-ring);
 }
 
+td input[data-obs-input] {
+  min-width: 180px;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  margin-bottom: 6px;
+}
+
 td button,
 .btn-preview {
   width: auto;
@@ -655,6 +668,18 @@ td button:hover,
   background: linear-gradient(180deg, #0b3d6e 0%, #072a4d 100%);
   transform: translateY(-2px);
   box-shadow: 0 7px 14px rgba(11, 61, 110, 0.3);
+}
+
+button[data-save-obs],
+button[data-contact-id] {
+  background: linear-gradient(180deg, #1b7a3e 0%, var(--success) 100%);
+  box-shadow: 0 4px 10px rgba(22, 101, 52, 0.22);
+}
+
+button[data-save-obs]:hover,
+button[data-contact-id]:hover {
+  background: linear-gradient(180deg, var(--success) 0%, var(--success-hover) 100%);
+  box-shadow: 0 7px 14px rgba(22, 101, 52, 0.3);
 }
 
 button[data-ban-user] {

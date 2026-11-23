@@ -421,6 +421,7 @@ app.get('/api/candidatos', requerirAdmin, async (req, res) => {
         c.IdCandidato, 
         c.Nombre, 
         c.Estatus, 
+        c.ObservacionAdmin,
         FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada,
         d.MimeType,
         d.NombreOriginal,
@@ -445,14 +446,17 @@ app.get('/api/usuarios', requerirAdmin, async (req, res) => {
     const pool = await getPool();
     const r = await pool.request().query(`
       SELECT 
-        IdUsuario,
-        Nombre,
-        Correo,
-        Estado,
-        EsAdmin,
-        FORMAT(FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
-      FROM Usuarios
-      ORDER BY FechaRegistro DESC
+        u.IdUsuario,
+        u.Nombre,
+        u.Correo,
+        u.Estado,
+        u.EsAdmin,
+        COUNT(d.IdDocumento) AS TotalEnvios,
+        FORMAT(u.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
+      FROM Usuarios u
+      LEFT JOIN Documentos d ON d.IdUsuario = u.IdUsuario
+      GROUP BY u.IdUsuario, u.Nombre, u.Correo, u.Estado, u.EsAdmin, u.FechaRegistro
+      ORDER BY u.FechaRegistro DESC
     `);
     res.json(r.recordset);
   } catch (e) {
@@ -574,6 +578,31 @@ app.put('/api/candidatos/:id/estatus', requerirAdmin, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Error al actualizar el estatus' });
+  }
+});
+
+app.put('/api/candidatos/:id/observacion', requerirAdmin, async (req, res) => {
+  const idCandidato = parseIdEntero(req.params.id);
+  const observacion = String(req.body?.observacion || '').trim();
+
+  if (!idCandidato) {
+    return res.status(400).json({ ok: false, error: 'ID inválido' });
+  }
+  if (observacion.length > 500) {
+    return res.status(400).json({ ok: false, error: 'La observación no puede superar 500 caracteres' });
+  }
+
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('ObservacionAdmin', sql.NVarChar(500), observacion || null)
+      .input('IdCandidato', sql.Int, idCandidato)
+      .query('UPDATE Candidatos SET ObservacionAdmin = @ObservacionAdmin WHERE IdCandidato = @IdCandidato');
+
+    res.json({ ok: true, observacion });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al guardar la observación' });
   }
 });
 
