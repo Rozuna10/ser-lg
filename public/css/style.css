@@ -106,56 +106,10 @@ header {
   z-index: 500;
 }
 
-header > div:first-child {
+header > div:not(.brand-container):first-child {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-header > div:first-child h1 {
-  margin: 0;
-  font-size: 22px;
-  letter-spacing: 0.6px;
-  font-weight: 600;
-  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
-}
-
-header > div:first-child p {
-  margin: 0;
-  font-size: 14px;
-  color: #cbd5e1;
-}
-
-header nav {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-header nav a {
-  color: #fff;
-  text-decoration: none;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
-  transition: all 0.22s ease;
-}
-
-header nav a:hover {
-  background: rgba(255, 255, 255, 0.22);
-  border-color: rgba(255, 255, 255, 0.35);
-  transform: translateY(-2px);
-}
-
-#sesionInfo {
-  font-size: 14px;
-  color: #e2e8f0;
-  font-weight: 500;
 }
 
 .brand-container {
@@ -186,32 +140,48 @@ header h1 {
   margin: 0;
   font-size: 22px;
   letter-spacing: 0.6px;
-  font-weight: 500;
+  font-weight: 600;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
+header p {
+  margin: 0;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+header nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+header nav a,
 .nav-link {
   color: #fff;
   text-decoration: none;
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.16);
-  padding: 12px 22px;
+  padding: 10px 18px;
   border-radius: 8px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
   transition: all 0.22s ease;
 }
 
+header nav a:hover,
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.22);
   border-color: rgba(255, 255, 255, 0.35);
   transform: translateY(-2px);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
 }
 
-.nav-link:active {
-  transform: translateY(0);
+#sesionInfo {
+  font-size: 14px;
+  color: #e2e8f0;
+  font-weight: 500;
 }
 
 main {
@@ -411,7 +381,7 @@ input[type="file"] {
 .password-container {
   position: relative;
   width: 100%;
-  margin: 18px 0 22px;
+  margin: 6px 0 14px;
   display: flex;
   align-items: stretch;
   border-radius: 8px;
@@ -442,8 +412,7 @@ input[type="file"] {
   box-shadow: var(--focus-ring);
 }
 
-.password-container #btnTogglePass,
-.password-container #btnToggleModalPass {
+.password-container button {
   position: absolute;
   right: 0;
   top: 0;
@@ -468,8 +437,7 @@ input[type="file"] {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.password-container #btnTogglePass:hover,
-.password-container #btnToggleModalPass:hover {
+.password-container button:hover {
   background: #cbd5e1;
   color: #0f172a;
   transform: none;

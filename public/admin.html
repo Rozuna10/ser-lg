@@ -8,9 +8,12 @@
 </head>
 <body>
   <header>
-    <div>
-      <h1>SER-LG — Administración</h1>
-      <p>Revisión de archivos, usuarios, baneos y permisos de administrador</p>
+    <div class="brand-container">
+      <div class="brand-logo">LG</div>
+      <div>
+        <h1>SER-LG — Administración</h1>
+        <p>Revisión de archivos, usuarios, baneos y permisos de administrador</p>
+      </div>
     </div>
     <nav>
       <a href="/">Vista de subida</a>
@@ -30,7 +33,10 @@
         <input type="email" id="adminCorreo" name="correo" required autocomplete="email">
 
         <label for="adminPass">Contraseña</label>
-        <input type="password" id="adminPass" name="password" required autocomplete="current-password">
+        <div class="password-container">
+          <input type="password" id="adminPass" name="password" required autocomplete="current-password">
+          <button type="button" id="btnToggleModalPass">Ver</button>
+        </div>
 
         <button type="submit">Iniciar sesión</button>
       </form>
@@ -88,6 +94,16 @@
     const adminMensaje = document.getElementById('adminMensaje');
     const tablaExpedientes = document.getElementById('tablaExpedientes');
     const tablaUsuarios = document.getElementById('tablaUsuarios');
+    const btnToggleModalPass = document.getElementById('btnToggleModalPass');
+    const adminPassInput = document.getElementById('adminPass');
+
+    if (btnToggleModalPass && adminPassInput) {
+      btnToggleModalPass.addEventListener('click', () => {
+        const esPassword = adminPassInput.type === 'password';
+        adminPassInput.type = esPassword ? 'text' : 'password';
+        btnToggleModalPass.textContent = esPassword ? 'Ocultar' : 'Ver';
+      });
+    }
 
     function mostrarAdminMensaje(texto, esError) {
       adminMensaje.textContent = texto || '';

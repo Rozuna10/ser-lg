@@ -8,9 +8,12 @@
 </head>
 <body>
   <header>
-    <div>
-      <h1>SER-LG</h1>
-      <p>Recepción de expedientes y documentos</p>
+    <div class="brand-container">
+      <div class="brand-logo">LG</div>
+      <div>
+        <h1>SER-LG</h1>
+        <p>Recepción de expedientes y documentos</p>
+      </div>
     </div>
     <nav>
       <span id="sesionInfo"></span>
@@ -38,7 +41,10 @@
         <input type="email" id="loginCorreo" name="correo" required autocomplete="email">
 
         <label for="loginPassword">Contraseña</label>
-        <input type="password" id="loginPassword" name="password" required autocomplete="current-password">
+        <div class="password-container">
+          <input type="password" id="loginPassword" name="password" required autocomplete="current-password">
+          <button type="button" id="btnTogglePass" data-target="loginPassword">Ver</button>
+        </div>
 
         <button type="submit">Entrar</button>
       </form>
@@ -52,7 +58,10 @@
         <input type="email" id="regCorreo" name="correo" required autocomplete="email">
 
         <label for="regPassword">Contraseña (mínimo 6 caracteres)</label>
-        <input type="password" id="regPassword" name="password" minlength="6" required autocomplete="new-password">
+        <div class="password-container">
+          <input type="password" id="regPassword" name="password" minlength="6" required autocomplete="new-password">
+          <button type="button" id="btnTogglePass" data-target="regPassword">Ver</button>
+        </div>
 
         <button type="submit">Registrarme</button>
       </form>
@@ -88,6 +97,16 @@
     const sesionInfo = document.getElementById('sesionInfo');
     const usuarioActivoTexto = document.getElementById('usuarioActivoTexto');
     const mensajeGlobal = document.getElementById('mensajeGlobal');
+
+    document.querySelectorAll('#btnTogglePass[data-target]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.getAttribute('data-target'));
+        if (!input) return;
+        const esPassword = input.type === 'password';
+        input.type = esPassword ? 'text' : 'password';
+        btn.textContent = esPassword ? 'Ocultar' : 'Ver';
+      });
+    });
 
     function mostrarMensaje(texto, esError) {
       mensajeGlobal.textContent = texto || '';
