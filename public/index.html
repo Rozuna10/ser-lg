@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>SER-LG | Buzón de Recepción Documental</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand-container">
+      <div class="brand-logo">LG</div>
+      <h1>LOGISTICS GROUP · Recepción Documental</h1>
+    </div>
+    <button type="button" id="btnIrAdmin" class="nav-link" style="width: auto;">Panel Administrador ➔</button>
+  </header>
+  
+  <main class="main-upload">
+    <div class="card upload-card center">
+      <h2>Buzón Exprés de Expedientes</h2>
+      <p class="section-desc">
+        Arrastre su archivo PDF o imagen a la zona inferior, o haga clic para seleccionarlo de forma segura.
+      </p>
+      
+      <form id="formExpediente">
+        <div class="file-drop-zone" id="dropZone">
+          <p id="dropText" style="margin: 0 0 10px 0; font-weight: 600; color: #475569;">📁 Arrastre su archivo aquí o haga clic</p>
+          <input type="file" id="fileInput" name="archivoExpediente" accept=".pdf,.jpg,.jpeg,.png" required style="display:none;">
+          <button type="button" id="btnBrowse" style="width: auto; padding: 10px 20px; font-size: 14px; background: #0b3d6e;">Examinar Archivo</button>
+          <div id="fileInfo" style="margin-top: 12px; font-size: 14px; color: #166534; font-weight: 600;"></div>
+        </div>
+        
+        <button type="submit" class="btn-lg-submit">Subir y Registrar Documento</button>
+      </form>
+    </div>
+  </main>
+
+  <div id="modalAdminAuth" class="modal" style="display:none;">
+    <div class="modal-content small">
+      <span class="close" onclick="cerrarModalAdmin()">&times;</span>
+      <h3 style="margin-top:0;">Acceso de Administrador</h3>
+      <p class="section-desc" style="margin-bottom: 20px;">Ingrese sus credenciales para abrir el panel.</p>
+      <form id="formModalAdmin">
+        <div class="password-container">
+          <input type="password" id="modalAdminPass" placeholder="Contraseña" required>
+          <button type="button" id="btnToggleModalPass" onclick="toggleModalPassword()">Ver</button>
+        </div>
+        <button type="submit">Verificar y Entrar</button>
+        <div id="modalAdminMsg"></div>
+      </form>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">LOGISTICS GROUP · SER-LG</div>
+          <p class="footer-copy">
+            Sistema de recepción y control documental para procesos de reclutamiento y gestión de expedientes.
+          </p>
+        </div>
+
+        <div>
+          <h3 class="footer-title">Formatos y Requisitos</h3>
+          <ul class="footer-list">
+            <li>Archivos admitidos: PDF, JPG y PNG</li>
+            <li>Tamaño máximo por envío: 10 MB</li>
+            <li>Registro automático con folio de seguimiento</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3 class="footer-title">Soporte y Control</h3>
+          <ul class="footer-list">
+            <li>Área de Reclutamiento y Expedientes</li>
+            <li>Horario de revisión administrativa en turno</li>
+            <li>Canal interno de validación documental</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer-notice">
+        <strong>Aviso de confidencialidad y tratamiento de datos:</strong> La documentación cargada en este portal es de uso exclusivo de LOGISTICS GROUP para fines de integración de expediente y trámite administrativo. Evite subir archivos con información no solicitada o de terceros.
+      </div>
+
+      <div class="footer-bottom">
+        <span>© 2026 LOGISTICS GROUP. Todos los derechos reservados.</span>
+        <span>SER-LG v1.0 · Uso interno autorizado</span>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script>
+    const form = document.getElementById('formExpediente');
+    const fileInput = document.getElementById('fileInput');
+    const btnBrowse = document.getElementById('btnBrowse');
+    const dropZone = document.getElementById('dropZone');
+    const fileInfo = document.getElementById('fileInfo');
+    const btnIrAdmin = document.getElementById('btnIrAdmin');
+    const modalAdminAuth = document.getElementById('modalAdminAuth');
+    const formModalAdmin = document.getElementById('formModalAdmin');
+    const modalAdminPass = document.getElementById('modalAdminPass');
+    const modalAdminMsg = document.getElementById('modalAdminMsg');
+
+    btnIrAdmin.addEventListener('click', () => {
+      modalAdminMsg.textContent = '';
+      modalAdminMsg.className = '';
+      modalAdminPass.value = '';
+      modalAdminAuth.style.display = 'flex';
+      modalAdminPass.focus();
+    });
+
+    function cerrarModalAdmin() {
+      modalAdminAuth.style.display = 'none';
+      modalAdminPass.value = '';
+      modalAdminMsg.textContent = '';
+    }
+
+    function toggleModalPassword() {
+      const btnToggle = document.getElementById('btnToggleModalPass');
+      if (modalAdminPass.type === 'password') {
+        modalAdminPass.type = 'text';
+        btnToggle.textContent = 'Ocultar';
+      } else {
+        modalAdminPass.type = 'password';
+        btnToggle.textContent = 'Ver';
+      }
+    }
+
+    formModalAdmin.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      modalAdminMsg.textContent = 'Verificando credenciales...';
+      modalAdminMsg.className = '';
+
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: modalAdminPass.value })
+        });
+        const data = await res.json();
+
+        if (data.ok && data.token) {
+          sessionStorage.setItem('serlg_admin_token', data.token);
+          window.location.href = 'admin.html';
+        } else {
+          modalAdminMsg.textContent = data.error || 'Credenciales incorrectas';
+          modalAdminMsg.className = 'error';
+        }
+      } catch {
+        modalAdminMsg.textContent = 'Error de conexión';
+        modalAdminMsg.className = 'error';
+      }
+    });
+
+    btnBrowse.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) {
+        fileInfo.textContent = 'Archivo seleccionado: ' + fileInput.files[0].name;
+      }
+    });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = '#0b3d6e';
+      dropZone.style.background = '#f1f5f9';
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+      dropZone.style.borderColor = '#94a3b8';
+      dropZone.style.background = '#f8fafc';
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.style.borderColor = '#94a3b8';
+      dropZone.style.background = '#f8fafc';
+      if (e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        fileInfo.textContent = 'Archivo seleccionado: ' + fileInput.files[0].name;
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      showToast('Enviando y procesando archivo...', 'info');
+
+      try {
+        const res = await fetch('/api/candidatos', { method: 'POST', body: new FormData(form) });
+        const d = await res.json();
+        if (d.ok) {
+          showToast('¡Expediente guardado con éxito! (ID: #' + d.idCandidato + ')', 'success');
+          form.reset();
+          fileInfo.textContent = '';
+        } else {
+          showToast('Error: ' + d.error, 'error');
+        }
+      } catch {
+        showToast('Error de conexión con el servidor', 'error');
+      }
+    });
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+  </script>
+</body>
+</html>
