@@ -2,177 +2,205 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SER-LG | Panel de Administración</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header>
-    <div class="brand-container">
-      <div class="brand-logo">LG</div>
-      <h1>LOGISTICS GROUP · Panel de Administración</h1>
+    <div>
+      <h1>SER-LG — Administración</h1>
+      <p>Revisión de archivos, trazabilidad de usuarios y control de baneos</p>
     </div>
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <button type="button" id="btnCerrarSesion" onclick="cerrarSesion()" class="nav-link" style="display:none; width:auto;">Cerrar Sesión</button>
-      <a href="index.html" class="nav-link" onclick="sessionStorage.removeItem('serlg_admin_token')">← Volver al Buzón</a>
-    </div>
+    <nav>
+      <a href="/">Vista de subida</a>
+      <a id="btnCsv" href="/api/exportar/csv" style="display:none;">Exportar CSV</a>
+      <button type="button" id="btnAdminLogout" style="display:none;">Cerrar sesión</button>
+    </nav>
   </header>
 
-  <main id="loginBox" style="max-width: 420px; margin-top: 80px;">
-    <div class="card center">
-      <h2>Acceso Restringido</h2>
-      <p class="section-desc">Ingrese la clave de supervisor para acceder al control de expedientes.</p>
-      <form id="formLogin">
-        <div class="password-container">
-          <input type="password" id="adminPass" placeholder="Contraseña" required>
-          <button type="button" id="btnTogglePass" onclick="togglePassword()">Ver</button>
-        </div>
-        <button type="submit" style="margin-top: 15px;">Ingresar al Panel</button>
-        <div id="loginMsg"></div>
+  <main>
+    <div id="adminMensaje" aria-live="polite"></div>
+
+    <section id="adminLoginBox">
+      <h2>Acceso administrador</h2>
+      <form id="formAdminLogin">
+        <label for="adminPass">Contraseña de administrador</label>
+        <input type="password" id="adminPass" name="password" required autocomplete="current-password">
+        <button type="submit">Ingresar</button>
       </form>
-    </div>
+    </section>
+
+    <section id="adminPanel" style="display:none;">
+      <section>
+        <h2>Expedientes y archivos subidos</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Expediente</th>
+              <th>Archivo</th>
+              <th>Usuario que subió</th>
+              <th>Estado usuario</th>
+              <th>Estatus</th>
+              <th>Fecha</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tablaExpedientes"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Usuarios registrados</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Correo</th>
+              <th>Estado</th>
+              <th>Registro</th>
+              <th>Moderación</th>
+            </tr>
+          </thead>
+          <tbody id="tablaUsuarios"></tbody>
+        </table>
+      </section>
+    </section>
   </main>
-
-  <main id="adminPanel" class="wide" style="display: none;">
-    
-    <div class="kpi-container">
-      <div class="kpi-card">
-        <h3 id="kpiTotal">0</h3>
-        <p>Total Expedientes</p>
-      </div>
-      <div class="kpi-card">
-        <h3 id="kpiRevision">0</h3>
-        <p>En Revisión</p>
-      </div>
-      <div class="kpi-card">
-        <h3 id="kpiAprobados">0</h3>
-        <p>Aprobados</p>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="admin-toolbar">
-        <h2>Expedientes Recibidos</h2>
-        <div class="toolbar-actions">
-          <input type="text" id="buscador" placeholder="Buscar por ID o Estatus..." onkeyup="filtrarTabla()" style="width: 220px;">
-          
-          <select id="filtroTipo" onchange="filtrarTabla()" style="padding: 12px;">
-            <option value="todos">Todos los formatos</option>
-            <option value="pdf">Solo PDF</option>
-            <option value="imagen">Solo Imágenes</option>
-          </select>
-
-          <button type="button" onclick="exportarCsv()" class="btn-excel">Exportar Excel / CSV</button>
-          <button onclick="cargar()" style="width: auto; padding: 12px 18px; font-size: 14px;">Actualizar</button>
-        </div>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Fecha y Hora</th>
-            <th>Estatus</th>
-            <th>Documento</th>
-            <th>Acciones</th>
-          </tr>
-        </thead>
-        <tbody id="tabla">
-          <tr><td colspan="5" style="text-align:center; color: #666; padding: 25px;">Cargando registros...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </main>
-
-  <footer class="site-footer">
-    <div class="footer-inner">
-      <div class="footer-bottom footer-bottom--centered">
-        <span>© 2026 LOGISTICS GROUP · SER-LG</span>
-        <span>·</span>
-        <span>Panel de Administración</span>
-      </div>
-    </div>
-  </footer>
-
-  <div id="modalPreview" class="modal" style="display:none;">
-    <div class="modal-content">
-      <span class="close" onclick="cerrarModal()">&times;</span>
-      <h3 style="margin-top:0; border-bottom: 1px solid #eee; padding-bottom: 10px;">Vista Previa del Documento</h3>
-      <div id="modalBody" style="margin-top: 15px; text-align: center;"></div>
-    </div>
-  </div>
-
-  <div id="modalConfirm" class="modal" style="display:none;">
-    <div class="modal-content small">
-      <h3 style="color: var(--danger); margin-top:0;">Confirmar Eliminación</h3>
-      <p class="section-desc">¿Está seguro de que desea eliminar este expediente y su archivo asociado del sistema?</p>
-      <div class="modal-actions">
-        <button type="button" class="btn-secondary" onclick="cerrarModalConfirm()">Cancelar</button>
-        <button type="button" id="btnConfirmDelete" style="background: var(--danger);">Sí, Eliminar</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="toastContainer" class="toast-container"></div>
 
   <script>
-    const formLogin = document.getElementById('formLogin');
-    const loginBox = document.getElementById('loginBox');
-    const adminPanel = document.getElementById('adminPanel');
-    const loginMsg = document.getElementById('loginMsg');
-    const btnCerrarSesion = document.getElementById('btnCerrarSesion');
-    let listaCandidatos = [];
-    let idParaEliminar = null;
-    let adminToken = '';
+    const ADMIN_TOKEN_KEY = 'serlg_admin_token';
 
-    function authHeaders(extra = {}) {
+    const adminLoginBox = document.getElementById('adminLoginBox');
+    const adminPanel = document.getElementById('adminPanel');
+    const formAdminLogin = document.getElementById('formAdminLogin');
+    const btnAdminLogout = document.getElementById('btnAdminLogout');
+    const btnCsv = document.getElementById('btnCsv');
+    const adminMensaje = document.getElementById('adminMensaje');
+    const tablaExpedientes = document.getElementById('tablaExpedientes');
+    const tablaUsuarios = document.getElementById('tablaUsuarios');
+
+    function mostrarAdminMensaje(texto, esError) {
+      adminMensaje.textContent = texto || '';
+      adminMensaje.dataset.tipo = esError ? 'error' : 'ok';
+    }
+
+    function getAdminToken() {
+      return localStorage.getItem(ADMIN_TOKEN_KEY);
+    }
+
+    function setAdminToken(token) {
+      if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token);
+      else localStorage.removeItem(ADMIN_TOKEN_KEY);
+      actualizarVistaAdmin();
+    }
+
+    function authHeaders(extra) {
       return {
-        'Authorization': `Bearer ${adminToken}`,
-        ...extra
+        Authorization: `Bearer ${getAdminToken()}`,
+        ...(extra || {})
       };
     }
 
-    function mostrarPanelAutenticado(token) {
-      adminToken = token;
-      loginBox.style.display = 'none';
+    async function actualizarVistaAdmin() {
+      const token = getAdminToken();
+      if (!token) {
+        adminLoginBox.style.display = 'block';
+        adminPanel.style.display = 'none';
+        btnAdminLogout.style.display = 'none';
+        btnCsv.style.display = 'none';
+        return;
+      }
+
+      adminLoginBox.style.display = 'none';
       adminPanel.style.display = 'block';
-      btnCerrarSesion.style.display = 'inline-block';
-      cargar();
+      btnAdminLogout.style.display = 'inline-block';
+      btnCsv.style.display = 'inline-block';
+
+      await Promise.all([cargarExpedientes(), cargarUsuarios()]);
     }
 
-    function cerrarSesion() {
-      adminToken = '';
-      sessionStorage.removeItem('serlg_admin_token');
-      adminPanel.style.display = 'none';
-      btnCerrarSesion.style.display = 'none';
-      loginBox.style.display = 'block';
-      document.getElementById('adminPass').value = '';
-      loginMsg.textContent = '';
-    }
-
-    window.addEventListener('DOMContentLoaded', () => {
-      const tokenGuardado = sessionStorage.getItem('serlg_admin_token');
-      if (tokenGuardado) {
-        sessionStorage.removeItem('serlg_admin_token');
-        mostrarPanelAutenticado(tokenGuardado);
+    async function cargarExpedientes() {
+      const res = await fetch('/api/candidatos', { headers: authHeaders() });
+      if (res.status === 401) {
+        setAdminToken(null);
+        return;
       }
-    });
+      const filas = await res.json();
+      tablaExpedientes.innerHTML = '';
 
-    function togglePassword() {
-      const passInput = document.getElementById('adminPass');
-      const btnToggle = document.getElementById('btnTogglePass');
-      if (passInput.type === 'password') {
-        passInput.type = 'text';
-        btnToggle.textContent = 'Ocultar';
-      } else {
-        passInput.type = 'password';
-        btnToggle.textContent = 'Ver';
-      }
+      filas.forEach((item) => {
+        const tr = document.createElement('tr');
+        const usuarioLabel = item.CorreoUsuario
+          ? `${item.NombreUsuario || ''} (${item.CorreoUsuario})`.trim()
+          : 'Sin usuario';
+        const estaBaneado = item.EstadoUsuario === 'baneado';
+
+        tr.innerHTML = `
+          <td>${item.IdCandidato}</td>
+          <td>${escapeHtml(item.Nombre || '')}</td>
+          <td>${escapeHtml(item.NombreOriginal || '')}</td>
+          <td>${escapeHtml(usuarioLabel)}</td>
+          <td>${escapeHtml(item.EstadoUsuario || 'activo')}</td>
+          <td>
+            <select data-estatus-id="${item.IdCandidato}">
+              <option value="En revisión" ${item.Estatus === 'En revisión' ? 'selected' : ''}>En revisión</option>
+              <option value="Aprobado" ${item.Estatus === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
+              <option value="Rechazado" ${item.Estatus === 'Rechazado' ? 'selected' : ''}>Rechazado</option>
+            </select>
+          </td>
+          <td>${escapeHtml(item.FechaFormateada || '')}</td>
+          <td>
+            <button type="button" data-ver-id="${item.IdCandidato}">Ver</button>
+            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
+            <button type="button" data-del-id="${item.IdCandidato}">Eliminar</button>
+          </td>
+        `;
+        tablaExpedientes.appendChild(tr);
+      });
     }
 
-    formLogin.addEventListener('submit', async (e) => {
+    async function cargarUsuarios() {
+      const res = await fetch('/api/usuarios', { headers: authHeaders() });
+      if (!res.ok) return;
+      const usuarios = await res.json();
+      tablaUsuarios.innerHTML = '';
+
+      usuarios.forEach((u) => {
+        const tr = document.createElement('tr');
+        const estaBaneado = u.Estado === 'baneado';
+        tr.innerHTML = `
+          <td>${u.IdUsuario}</td>
+          <td>${escapeHtml(u.Nombre)}</td>
+          <td>${escapeHtml(u.Correo)}</td>
+          <td>${escapeHtml(u.Estado)}</td>
+          <td>${escapeHtml(u.FechaFormateada || '')}</td>
+          <td>
+            <button type="button" data-ban-user="${u.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">
+              ${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}
+            </button>
+          </td>
+        `;
+        tablaUsuarios.appendChild(tr);
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, (m) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[m]));
+    }
+
+    formAdminLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
+      mostrarAdminMensaje('', false);
       const password = document.getElementById('adminPass').value;
-      loginMsg.textContent = 'Verificando credenciales...';
-      loginMsg.className = '';
 
       try {
         const res = await fetch('/api/admin/login', {
@@ -181,230 +209,100 @@
           body: JSON.stringify({ password })
         });
         const data = await res.json();
-
-        if (data.ok && data.token) {
-          mostrarPanelAutenticado(data.token);
-          showToast('Bienvenido al Panel de Administración', 'success');
-        } else {
-          loginMsg.textContent = data.error;
-          loginMsg.className = 'error';
+        if (!res.ok || !data.ok) {
+          mostrarAdminMensaje(data.error || 'Acceso denegado', true);
+          return;
         }
+        formAdminLogin.reset();
+        setAdminToken(data.token);
       } catch {
-        loginMsg.textContent = 'Error de conexión';
-        loginMsg.className = 'error';
+        mostrarAdminMensaje('Error de conexión', true);
       }
     });
 
-    async function cargar() {
-      try {
-        const res = await fetch('/api/candidatos', { headers: authHeaders() });
-        if (res.status === 401) {
-          cerrarSesion();
-          return;
-        }
-        listaCandidatos = await res.json();
-        renderizarTabla(listaCandidatos);
-        actualizarKPIs(listaCandidatos);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    btnAdminLogout.addEventListener('click', () => {
+      setAdminToken(null);
+      mostrarAdminMensaje('Sesión cerrada.', false);
+    });
 
-    async function renderizarTabla(lista) {
-      const tbody = document.getElementById('tabla');
-      tbody.innerHTML = '';
-      
-      if (lista.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #666; padding: 25px;">No hay registros en la base de datos</td></tr>';
+    btnCsv.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const res = await fetch('/api/exportar/csv', { headers: authHeaders() });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Reporte_Expedientes_LogisticsGroup.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    tablaExpedientes.addEventListener('change', async (e) => {
+      const sel = e.target.closest('select[data-estatus-id]');
+      if (!sel) return;
+      const id = sel.getAttribute('data-estatus-id');
+      const res = await fetch(`/api/candidatos/${id}/estatus`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ estatus: sel.value })
+      });
+      if (res.ok) mostrarAdminMensaje('Estatus actualizado.', false);
+      else mostrarAdminMensaje('No se pudo actualizar el estatus.', true);
+    });
+
+    document.addEventListener('click', async (e) => {
+      const verBtn = e.target.closest('button[data-ver-id]');
+      if (verBtn) {
+        const id = verBtn.getAttribute('data-ver-id');
+        const res = await fetch(`/api/candidatos/${id}/documentos`, { headers: authHeaders() });
+        const docs = await res.json();
+        for (const d of docs) {
+          const fileRes = await fetch(d.RutaArchivo, { headers: authHeaders() });
+          if (fileRes.ok) {
+            const blob = await fileRes.blob();
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          }
+        }
         return;
       }
 
-      for (const c of lista) {
-        const resDocs = await fetch(`/api/candidatos/${c.IdCandidato}/documentos`, { headers: authHeaders() });
-        if (resDocs.status === 401) {
-          cerrarSesion();
-          return;
-        }
-        const docs = await resDocs.json();
-        const doc = docs[0];
-        
-        let linkDoc = '—';
-        if (doc) {
-          linkDoc = `<button onclick="abrirModal('${doc.RutaArchivo}', '${doc.MimeType}')" class="btn-preview">Ver Documento</button>`;
-        }
-        
-        const selectEstatus = `
-          <select onchange="cambiarEstatus(${c.IdCandidato}, this.value)">
-            <option value="En revisión" ${c.Estatus === 'En revisión' ? 'selected' : ''}>En revisión</option>
-            <option value="Aprobado" ${c.Estatus === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
-            <option value="Rechazado" ${c.Estatus === 'Rechazado' ? 'selected' : ''}>Rechazado</option>
-          </select>
-        `;
-
-        const btnEliminar = `<button onclick="confirmarEliminar(${c.IdCandidato})" class="btn-delete">Eliminar</button>`;
-
-        const tr = document.createElement('tr');
-        tr.dataset.mime = doc ? doc.MimeType : '';
-        tr.innerHTML = `
-          <td><strong>#${c.IdCandidato}</strong></td>
-          <td>${c.FechaFormateada}</td>
-          <td>${selectEstatus}</td>
-          <td>${linkDoc}</td>
-          <td>${btnEliminar}</td>
-        `;
-        tbody.appendChild(tr);
-      }
-    }
-
-    function actualizarKPIs(lista) {
-      document.getElementById('kpiTotal').textContent = lista.length;
-      document.getElementById('kpiRevision').textContent = lista.filter(c => c.Estatus === 'En revisión').length;
-      document.getElementById('kpiAprobados').textContent = lista.filter(c => c.Estatus === 'Aprobado').length;
-    }
-
-    function filtrarTabla() {
-      const texto = document.getElementById('buscador').value.toLowerCase();
-      const tipoFiltro = document.getElementById('filtroTipo').value;
-
-      const filtrados = listaCandidatos.filter(c => {
-        const coincideTexto = c.IdCandidato.toString().includes(texto) || c.Estatus.toLowerCase().includes(texto);
-        
-        let coincideTipo = true;
-        if (tipoFiltro === 'pdf') {
-          coincideTipo = c.MimeType && c.MimeType.includes('pdf');
-        } else if (tipoFiltro === 'imagen') {
-          coincideTipo = c.MimeType && c.MimeType.includes('image');
-        }
-
-        return coincideTexto && coincideTipo;
-      });
-
-      renderizarTabla(filtrados);
-    }
-
-    async function exportarCsv() {
-      try {
-        const res = await fetch('/api/exportar/csv', { headers: authHeaders() });
-        if (res.status === 401) {
-          cerrarSesion();
-          return;
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Reporte_Expedientes_LogisticsGroup.csv';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } catch {
-        showToast('Error al exportar el reporte', 'error');
-      }
-    }
-
-    async function cambiarEstatus(idCandidato, nuevoEstatus) {
-      try {
-        const res = await fetch(`/api/candidatos/${idCandidato}/estatus`, {
+      const banBtn = e.target.closest('button[data-ban-user]');
+      if (banBtn) {
+        const idUsuario = banBtn.getAttribute('data-ban-user');
+        const nuevoEstado = banBtn.getAttribute('data-ban-estado');
+        const res = await fetch(`/api/usuarios/${idUsuario}/estado`, {
           method: 'PUT',
           headers: authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ estatus: nuevoEstatus })
+          body: JSON.stringify({ estado: nuevoEstado })
         });
-        if (res.status === 401) {
-          cerrarSesion();
-          return;
-        }
-        const data = await res.json();
-        if (data.ok) {
-          const item = listaCandidatos.find(c => c.IdCandidato === idCandidato);
-          if (item) item.Estatus = nuevoEstatus;
-          actualizarKPIs(listaCandidatos);
-          showToast('Estatus actualizado correctamente', 'success');
+        if (res.ok) {
+          mostrarAdminMensaje(`Usuario actualizado a: ${nuevoEstado}.`, false);
+          await Promise.all([cargarExpedientes(), cargarUsuarios()]);
         } else {
-          showToast('Error al actualizar el estatus', 'error');
+          mostrarAdminMensaje('Error al cambiar estado del usuario.', true);
         }
-      } catch (e) {
-        showToast('Error de conexión', 'error');
+        return;
       }
-    }
 
-    function confirmarEliminar(id) {
-      idParaEliminar = id;
-      document.getElementById('modalConfirm').style.display = 'flex';
-    }
-
-    function cerrarModalConfirm() {
-      document.getElementById('modalConfirm').style.display = 'none';
-      idParaEliminar = null;
-    }
-
-    document.getElementById('btnConfirmDelete').addEventListener('click', async () => {
-      if (!idParaEliminar) return;
-      try {
-        const res = await fetch(`/api/candidatos/${idParaEliminar}`, {
+      const delBtn = e.target.closest('button[data-del-id]');
+      if (delBtn) {
+        const id = delBtn.getAttribute('data-del-id');
+        const res = await fetch(`/api/candidatos/${id}`, {
           method: 'DELETE',
           headers: authHeaders()
         });
-        if (res.status === 401) {
-          cerrarSesion();
-          return;
-        }
-        const data = await res.json();
-        if (data.ok) {
-          cerrarModalConfirm();
-          cargar();
-          showToast('Expediente eliminado con éxito', 'success');
+        if (res.ok) {
+          mostrarAdminMensaje('Expediente eliminado.', false);
+          await cargarExpedientes();
         } else {
-          showToast('Error al eliminar', 'error');
+          mostrarAdminMensaje('Error al eliminar expediente.', true);
         }
-      } catch {
-        showToast('Error de conexión', 'error');
       }
     });
 
-    async function abrirModal(ruta, mime) {
-      const modal = document.getElementById('modalPreview');
-      const body = document.getElementById('modalBody');
-      modal.style.display = 'flex';
-      body.innerHTML = '<p style="color:#64748b;">Cargando documento...</p>';
-
-      try {
-        const res = await fetch(ruta, { headers: authHeaders() });
-        if (res.status === 401) {
-          cerrarModal();
-          cerrarSesion();
-          return;
-        }
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-
-        if (mime.includes('image')) {
-          body.innerHTML = `<img src="${blobUrl}" style="max-width:100%; max-height:75vh; border-radius:6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">`;
-        } else {
-          body.innerHTML = `<iframe src="${blobUrl}" style="width:100%; height:75vh; border:none; border-radius:6px;"></iframe>`;
-        }
-      } catch {
-        body.innerHTML = '<p class="error">No se pudo cargar el documento</p>';
-      }
-    }
-
-    function cerrarModal() {
-      document.getElementById('modalPreview').style.display = 'none';
-      document.getElementById('modalBody').innerHTML = '';
-    }
-
-    function showToast(message, type = 'success') {
-      const container = document.getElementById('toastContainer');
-      const toast = document.createElement('div');
-      toast.className = `toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
-
-      setTimeout(() => {
-        toast.style.opacity = '0';
-        setTimeout(() => toast.remove(), 300);
-      }, 4000);
-    }
+    actualizarVistaAdmin();
   </script>
 </body>
 </html>

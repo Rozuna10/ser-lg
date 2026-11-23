@@ -56,9 +56,26 @@ const upload = multer({
 });
 
 const loginIntentos = new Map();
+const uploadFrecuencia = new Map();
 const MAX_INTENTOS = 5;
 const VENTANA_MS = 60 * 1000;
 const BLOQUEO_MS = 5 * 60 * 1000;
+const MAX_SUBIDAS_MIN = 8;
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verificarPassword(password, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, originalHash] = storedHash.split(':');
+  const derivedHash = crypto.scryptSync(password, salt, 64);
+  const originalBuf = Buffer.from(originalHash, 'hex');
+  if (derivedHash.length !== originalBuf.length) return false;
+  return crypto.timingSafeEqual(derivedHash, originalBuf);
+}
 
 function verificarLimiteLogin(ip) {
   const ahora = Date.now();
@@ -101,39 +118,84 @@ function limpiarIntentosLogin(ip) {
   loginIntentos.delete(ip);
 }
 
-function crearTokenAdmin() {
+function verificarLimiteSubida(idUsuario) {
+  const ahora = Date.now();
+  const lista = (uploadFrecuencia.get(idUsuario) || []).filter((ts) => ahora - ts < 60 * 1000);
+  if (lista.length >= MAX_SUBIDAS_MIN) {
+    uploadFrecuencia.set(idUsuario, lista);
+    return false;
+  }
+  lista.push(ahora);
+  uploadFrecuencia.set(idUsuario, lista);
+  return true;
+}
+
+function crearToken(payloadObj) {
   const exp = Date.now() + TOKEN_TTL_MS;
-  const payload = Buffer.from(JSON.stringify({ role: 'admin', exp })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ ...payloadObj, exp })).toString('base64url');
   const firma = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   return `${payload}.${firma}`;
 }
 
-function validarTokenAdmin(token) {
-  if (!token || typeof token !== 'string') return false;
+function validarToken(token, rolEsperado) {
+  if (!token || typeof token !== 'string') return null;
   const partes = token.split('.');
-  if (partes.length !== 2) return false;
+  if (partes.length !== 2) return null;
   const [payload, firma] = partes;
   const firmaEsperada = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
 
   const bufA = Buffer.from(firma);
   const bufB = Buffer.from(firmaEsperada);
-  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) return false;
+  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) return null;
 
   try {
     const datos = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return datos.role === 'admin' && typeof datos.exp === 'number' && Date.now() < datos.exp;
+    if (datos.role !== rolEsperado || typeof datos.exp !== 'number' || Date.now() >= datos.exp) {
+      return null;
+    }
+    return datos;
   } catch {
-    return false;
+    return null;
   }
 }
 
 function requerirAdmin(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  if (!validarTokenAdmin(token)) {
+  if (!validarToken(token, 'admin')) {
     return res.status(401).json({ ok: false, error: 'No autorizado' });
   }
   next();
+}
+
+async function requerirUsuarioActivo(req, res, next) {
+  const rawToken = req.headers['x-user-token'] || req.headers.authorization || '';
+  const token = String(rawToken).startsWith('Bearer ') ? String(rawToken).slice(7).trim() : String(rawToken).trim();
+  const datos = validarToken(token, 'user');
+  if (!datos || !datos.idUsuario) {
+    return res.status(401).json({ ok: false, error: 'Debe iniciar sesión para subir archivos' });
+  }
+
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('IdUsuario', sql.Int, datos.idUsuario)
+      .query('SELECT IdUsuario, Nombre, Correo, Estado FROM Usuarios WHERE IdUsuario = @IdUsuario');
+    const usuario = r.recordset[0];
+    if (!usuario) {
+      return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+    if (usuario.Estado === 'baneado') {
+      return res.status(403).json({
+        ok: false,
+        error: 'Su cuenta ha sido baneada por subir contenido no permitido o spam'
+      });
+    }
+    req.usuario = usuario;
+    next();
+  } catch {
+    return res.status(500).json({ ok: false, error: 'Error al validar sesión de usuario' });
+  }
 }
 
 function parseIdEntero(valor) {
@@ -155,6 +217,117 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', requerirAdmin, express.static(uploadDir));
+
+app.post('/api/auth/register', async (req, res) => {
+  const nombre = String(req.body?.nombre || '').trim();
+  const correo = String(req.body?.correo || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  if (nombre.length < 2 || nombre.length > 120) {
+    return res.status(400).json({ ok: false, error: 'Ingrese un nombre válido' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) || correo.length > 150) {
+    return res.status(400).json({ ok: false, error: 'Ingrese un correo válido' });
+  }
+  if (password.length < 6) {
+    return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+
+  try {
+    const pool = await getPool();
+    const existe = await pool.request()
+      .input('Correo', sql.VarChar(150), correo)
+      .query('SELECT IdUsuario FROM Usuarios WHERE Correo = @Correo');
+
+    if (existe.recordset.length > 0) {
+      return res.status(409).json({ ok: false, error: 'Ese correo ya está registrado' });
+    }
+
+    const passwordHash = hashPassword(password);
+    const ins = await pool.request()
+      .input('Nombre', sql.VarChar(120), nombre)
+      .input('Correo', sql.VarChar(150), correo)
+      .input('PasswordHash', sql.VarChar(255), passwordHash)
+      .input('Estado', sql.VarChar(20), 'activo')
+      .query(`
+        INSERT INTO Usuarios (Nombre, Correo, PasswordHash, Estado)
+        OUTPUT INSERTED.IdUsuario, INSERTED.Nombre, INSERTED.Correo, INSERTED.Estado
+        VALUES (@Nombre, @Correo, @PasswordHash, @Estado)
+      `);
+
+    const usuario = ins.recordset[0];
+    const token = crearToken({ role: 'user', idUsuario: usuario.IdUsuario, correo: usuario.Correo });
+    return res.json({
+      ok: true,
+      token,
+      usuario: {
+        idUsuario: usuario.IdUsuario,
+        nombre: usuario.Nombre,
+        correo: usuario.Correo,
+        estado: usuario.Estado
+      },
+      aviso: 'Recuerde subir únicamente archivos correspondientes. Subir contenido indebido o hacer spam resultará en baneo de su cuenta.'
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: 'Error al registrar usuario' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const estadoLimite = verificarLimiteLogin(ip);
+  if (!estadoLimite.permitido) {
+    return res.status(429).json({
+      ok: false,
+      error: `Demasiados intentos. Intente de nuevo en ${estadoLimite.segRestantes} segundos`
+    });
+  }
+
+  const correo = String(req.body?.correo || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+
+  if (!correo || !password) {
+    registrarFalloLogin(ip);
+    return res.status(401).json({ ok: false, error: 'Credenciales inválidas' });
+  }
+
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('Correo', sql.VarChar(150), correo)
+      .query('SELECT IdUsuario, Nombre, Correo, PasswordHash, Estado FROM Usuarios WHERE Correo = @Correo');
+
+    const usuario = r.recordset[0];
+    if (!usuario || !verificarPassword(password, usuario.PasswordHash)) {
+      registrarFalloLogin(ip);
+      return res.status(401).json({ ok: false, error: 'Correo o contraseña incorrectos' });
+    }
+
+    if (usuario.Estado === 'baneado') {
+      return res.status(403).json({
+        ok: false,
+        error: 'Su cuenta está baneada por subir contenido no permitido o spam'
+      });
+    }
+
+    limpiarIntentosLogin(ip);
+    const token = crearToken({ role: 'user', idUsuario: usuario.IdUsuario, correo: usuario.Correo });
+    return res.json({
+      ok: true,
+      token,
+      usuario: {
+        idUsuario: usuario.IdUsuario,
+        nombre: usuario.Nombre,
+        correo: usuario.Correo,
+        estado: usuario.Estado
+      }
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: 'Error al iniciar sesión' });
+  }
+});
 
 app.post('/api/admin/login', (req, res) => {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
@@ -180,7 +353,7 @@ app.post('/api/admin/login', (req, res) => {
 
   if (coincide) {
     limpiarIntentosLogin(ip);
-    const token = crearTokenAdmin();
+    const token = crearToken({ role: 'admin' });
     return res.json({ ok: true, token });
   }
 
@@ -188,7 +361,12 @@ app.post('/api/admin/login', (req, res) => {
   return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
 });
 
-app.post('/api/candidatos', upload.single('archivoExpediente'), async (req, res) => {
+app.post('/api/candidatos', requerirUsuarioActivo, upload.single('archivoExpediente'), async (req, res) => {
+  if (!verificarLimiteSubida(req.usuario.IdUsuario)) {
+    if (req.file) fs.unlink(req.file.path, () => {});
+    return res.status(429).json({ ok: false, error: 'Límite de subidas por minuto alcanzado. Evite hacer spam' });
+  }
+
   if (!req.file) return res.status(400).json({ ok: false, error: 'Archivo requerido' });
 
   const pool = await getPool().catch(() => null);
@@ -214,8 +392,12 @@ app.post('/api/candidatos', upload.single('archivoExpediente'), async (req, res)
       .input('NombreArchivo', sql.NVarChar(255), req.file.filename)
       .input('Ruta', sql.NVarChar(500), '/uploads/' + req.file.filename)
       .input('Mime', sql.NVarChar(100), req.file.mimetype)
-      .query(`INSERT INTO Documentos (IdCandidato, TipoDocumento, NombreOriginal, NombreArchivo, RutaArchivo, MimeType)
-              VALUES (@IdCandidato, @Tipo, @NombreOriginal, @NombreArchivo, @Ruta, @Mime)`);
+      .input('IdUsuario', sql.Int, req.usuario.IdUsuario)
+      .input('CorreoUsuario', sql.VarChar(150), req.usuario.Correo)
+      .query(`
+        INSERT INTO Documentos (IdCandidato, TipoDocumento, NombreOriginal, NombreArchivo, RutaArchivo, MimeType, IdUsuario, CorreoUsuario)
+        VALUES (@IdCandidato, @Tipo, @NombreOriginal, @NombreArchivo, @Ruta, @Mime, @IdUsuario, @CorreoUsuario)
+      `);
 
     await tx.commit();
     res.json({ ok: true, idCandidato });
@@ -236,9 +418,14 @@ app.get('/api/candidatos', requerirAdmin, async (req, res) => {
         c.Estatus, 
         FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada,
         d.MimeType,
-        d.NombreOriginal
+        d.NombreOriginal,
+        d.IdUsuario,
+        COALESCE(u.Correo, d.CorreoUsuario) AS CorreoUsuario,
+        u.Nombre AS NombreUsuario,
+        COALESCE(u.Estado, 'activo') AS EstadoUsuario
       FROM Candidatos c
       LEFT JOIN Documentos d ON c.IdCandidato = d.IdCandidato
+      LEFT JOIN Usuarios u ON d.IdUsuario = u.IdUsuario
       ORDER BY c.FechaRegistro DESC
     `);
     res.json(r.recordset);
@@ -248,27 +435,76 @@ app.get('/api/candidatos', requerirAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/usuarios', requerirAdmin, async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request().query(`
+      SELECT 
+        IdUsuario,
+        Nombre,
+        Correo,
+        Estado,
+        FORMAT(FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
+      FROM Usuarios
+      ORDER BY FechaRegistro DESC
+    `);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al consultar usuarios' });
+  }
+});
+
+app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
+  const idUsuario = parseIdEntero(req.params.id);
+  const { estado } = req.body || {};
+  const estadosPermitidos = ['activo', 'baneado'];
+
+  if (!idUsuario) {
+    return res.status(400).json({ ok: false, error: 'ID de usuario inválido' });
+  }
+  if (!estadosPermitidos.includes(estado)) {
+    return res.status(400).json({ ok: false, error: 'Estado no válido' });
+  }
+
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('Estado', sql.VarChar(20), estado)
+      .input('IdUsuario', sql.Int, idUsuario)
+      .query('UPDATE Usuarios SET Estado = @Estado WHERE IdUsuario = @IdUsuario');
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al actualizar estado del usuario' });
+  }
+});
+
 app.get('/api/exportar/csv', requerirAdmin, async (req, res) => {
   try {
     const pool = await getPool();
     const r = await pool.request().query(`
       SELECT 
-        IdCandidato, 
-        Nombre, 
-        Estatus, 
-        FORMAT(FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
-      FROM Candidatos 
-      ORDER BY FechaRegistro DESC
+        c.IdCandidato, 
+        c.Nombre, 
+        c.Estatus, 
+        COALESCE(u.Correo, d.CorreoUsuario) AS CorreoUsuario,
+        FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
+      FROM Candidatos c
+      LEFT JOIN Documentos d ON c.IdCandidato = d.IdCandidato
+      LEFT JOIN Usuarios u ON d.IdUsuario = u.IdUsuario
+      ORDER BY c.FechaRegistro DESC
     `);
 
     const escapar = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
 
-    let csv = '\uFEFFID,Nombre,Estatus,Fecha de Registro\n';
-    r.recordset.forEach(row => {
+    let csv = '\uFEFFID,Nombre,Estatus,Usuario,Fecha de Registro\n';
+    r.recordset.forEach((row) => {
       csv += [
         escapar(row.IdCandidato),
         escapar(row.Nombre),
         escapar(row.Estatus),
+        escapar(row.CorreoUsuario),
         escapar(row.FechaFormateada)
       ].join(',') + '\n';
     });
@@ -300,7 +536,7 @@ app.put('/api/candidatos/:id/estatus', requerirAdmin, async (req, res) => {
       .input('Estatus', sql.NVarChar(50), estatus)
       .input('IdCandidato', sql.Int, idCandidato)
       .query('UPDATE Candidatos SET Estatus = @Estatus WHERE IdCandidato = @IdCandidato');
-    
+
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -333,12 +569,12 @@ app.delete('/api/candidatos/:id', requerirAdmin, async (req, res) => {
 
   try {
     const pool = await getPool();
-    
+
     const docs = await pool.request()
       .input('id', sql.Int, idCandidato)
       .query('SELECT RutaArchivo FROM Documentos WHERE IdCandidato=@id');
 
-    docs.recordset.forEach(doc => {
+    docs.recordset.forEach((doc) => {
       if (!doc.RutaArchivo) return;
       const nombreBase = path.basename(doc.RutaArchivo);
       const rutaFisica = path.resolve(uploadDir, nombreBase);
