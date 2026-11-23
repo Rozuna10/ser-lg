@@ -10,7 +10,7 @@
   <header>
     <div>
       <h1>SER-LG — Administración</h1>
-      <p>Revisión de archivos, trazabilidad de usuarios y control de baneos</p>
+      <p>Revisión de archivos, usuarios, baneos y permisos de administrador</p>
     </div>
     <nav>
       <a href="/">Vista de subida</a>
@@ -22,12 +22,17 @@
   <main>
     <div id="adminMensaje" aria-live="polite"></div>
 
-    <section id="adminLoginBox">
+    <section id="adminLoginBox" style="display:none;">
       <h2>Acceso administrador</h2>
+      <p>Inicie sesión con una cuenta que tenga permisos de administrador.</p>
       <form id="formAdminLogin">
-        <label for="adminPass">Contraseña de administrador</label>
+        <label for="adminCorreo">Correo electrónico</label>
+        <input type="email" id="adminCorreo" name="correo" required autocomplete="email">
+
+        <label for="adminPass">Contraseña</label>
         <input type="password" id="adminPass" name="password" required autocomplete="current-password">
-        <button type="submit">Ingresar</button>
+
+        <button type="submit">Iniciar sesión</button>
       </form>
     </section>
 
@@ -52,7 +57,7 @@
       </section>
 
       <section>
-        <h2>Usuarios registrados</h2>
+        <h2>Usuarios registrados y permisos de admin</h2>
         <table>
           <thead>
             <tr>
@@ -60,8 +65,9 @@
               <th>Nombre</th>
               <th>Correo</th>
               <th>Estado</th>
+              <th>Rol</th>
               <th>Registro</th>
-              <th>Moderación</th>
+              <th>Moderación y permisos</th>
             </tr>
           </thead>
           <tbody id="tablaUsuarios"></tbody>
@@ -71,7 +77,8 @@
   </main>
 
   <script>
-    const ADMIN_TOKEN_KEY = 'serlg_admin_token';
+    const TOKEN_KEY = 'serlg_user_token';
+    const USER_KEY = 'serlg_user_data';
 
     const adminLoginBox = document.getElementById('adminLoginBox');
     const adminPanel = document.getElementById('adminPanel');
@@ -87,30 +94,41 @@
       adminMensaje.dataset.tipo = esError ? 'error' : 'ok';
     }
 
-    function getAdminToken() {
-      return localStorage.getItem(ADMIN_TOKEN_KEY);
+    function getSesion() {
+      const token = localStorage.getItem(TOKEN_KEY);
+      let usuario = null;
+      try {
+        usuario = JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+      } catch {
+        usuario = null;
+      }
+      return { token, usuario };
     }
 
-    function setAdminToken(token) {
-      if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token);
-      else localStorage.removeItem(ADMIN_TOKEN_KEY);
-      actualizarVistaAdmin();
+    function limpiarSesion() {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
     }
 
     function authHeaders(extra) {
+      const { token } = getSesion();
       return {
-        Authorization: `Bearer ${getAdminToken()}`,
+        'x-user-token': token || '',
         ...(extra || {})
       };
     }
 
     async function actualizarVistaAdmin() {
-      const token = getAdminToken();
-      if (!token) {
+      const { token, usuario } = getSesion();
+
+      if (!token || !usuario || !usuario.esAdmin) {
         adminLoginBox.style.display = 'block';
         adminPanel.style.display = 'none';
         btnAdminLogout.style.display = 'none';
         btnCsv.style.display = 'none';
+        if (token && usuario && !usuario.esAdmin) {
+          mostrarAdminMensaje('Su cuenta no tiene permisos para acceder al panel de administrador.', true);
+        }
         return;
       }
 
@@ -124,8 +142,8 @@
 
     async function cargarExpedientes() {
       const res = await fetch('/api/candidatos', { headers: authHeaders() });
-      if (res.status === 401) {
-        setAdminToken(null);
+      if (res.status === 401 || res.status === 403) {
+        actualizarVistaAdmin();
         return;
       }
       const filas = await res.json();
@@ -166,21 +184,25 @@
       const res = await fetch('/api/usuarios', { headers: authHeaders() });
       if (!res.ok) return;
       const usuarios = await res.json();
+      const { usuario: actual } = getSesion();
       tablaUsuarios.innerHTML = '';
 
       usuarios.forEach((u) => {
         const tr = document.createElement('tr');
         const estaBaneado = u.Estado === 'baneado';
+        const esAdmin = Boolean(u.EsAdmin);
+        const esMiCuenta = actual && actual.idUsuario === u.IdUsuario;
+
         tr.innerHTML = `
           <td>${u.IdUsuario}</td>
           <td>${escapeHtml(u.Nombre)}</td>
           <td>${escapeHtml(u.Correo)}</td>
           <td>${escapeHtml(u.Estado)}</td>
+          <td>${esAdmin ? 'Admin' : 'Usuario'}</td>
           <td>${escapeHtml(u.FechaFormateada || '')}</td>
           <td>
-            <button type="button" data-ban-user="${u.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">
-              ${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}
-            </button>
+            ${!esMiCuenta ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>` : ''}
+            ${!esMiCuenta ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>` : '<span>Cuenta actual</span>'}
           </td>
         `;
         tablaUsuarios.appendChild(tr);
@@ -200,28 +222,36 @@
     formAdminLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
       mostrarAdminMensaje('', false);
+      const correo = document.getElementById('adminCorreo').value.trim();
       const password = document.getElementById('adminPass').value;
 
       try {
-        const res = await fetch('/api/admin/login', {
+        const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ correo, password })
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-          mostrarAdminMensaje(data.error || 'Acceso denegado', true);
+          mostrarAdminMensaje(data.error || 'No se pudo iniciar sesión', true);
           return;
         }
+        if (!data.usuario?.esAdmin) {
+          mostrarAdminMensaje('Este usuario no tiene permisos de administrador.', true);
+          return;
+        }
+        localStorage.setItem(TOKEN_KEY, data.token);
+        localStorage.setItem(USER_KEY, JSON.stringify(data.usuario));
         formAdminLogin.reset();
-        setAdminToken(data.token);
+        await actualizarVistaAdmin();
       } catch {
         mostrarAdminMensaje('Error de conexión', true);
       }
     });
 
     btnAdminLogout.addEventListener('click', () => {
-      setAdminToken(null);
+      limpiarSesion();
+      actualizarVistaAdmin();
       mostrarAdminMensaje('Sesión cerrada.', false);
     });
 
@@ -277,11 +307,34 @@
           headers: authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ estado: nuevoEstado })
         });
+        const data = await res.json().catch(() => ({}));
         if (res.ok) {
           mostrarAdminMensaje(`Usuario actualizado a: ${nuevoEstado}.`, false);
           await Promise.all([cargarExpedientes(), cargarUsuarios()]);
         } else {
-          mostrarAdminMensaje('Error al cambiar estado del usuario.', true);
+          mostrarAdminMensaje(data.error || 'Error al cambiar estado del usuario.', true);
+        }
+        return;
+      }
+
+      const adminBtn = e.target.closest('button[data-admin-user]');
+      if (adminBtn) {
+        const idUsuario = adminBtn.getAttribute('data-admin-user');
+        const nuevoAdmin = adminBtn.getAttribute('data-admin-valor') === 'true';
+        const res = await fetch(`/api/usuarios/${idUsuario}/admin`, {
+          method: 'PUT',
+          headers: authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ esAdmin: nuevoAdmin })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          mostrarAdminMensaje(
+            nuevoAdmin ? 'Permiso de administrador concedido.' : 'Permiso de administrador revocado.',
+            false
+          );
+          await cargarUsuarios();
+        } else {
+          mostrarAdminMensaje(data.error || 'Error al cambiar permiso de administrador.', true);
         }
         return;
       }

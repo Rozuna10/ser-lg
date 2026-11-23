@@ -10,6 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 8;
+const INITIAL_ADMIN_EMAIL = (process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
 
 const dbConfig = {
   user: process.env.DB_USER,
@@ -137,7 +138,7 @@ function crearToken(payloadObj) {
   return `${payload}.${firma}`;
 }
 
-function validarToken(token, rolEsperado) {
+function validarToken(token) {
   if (!token || typeof token !== 'string') return null;
   const partes = token.split('.');
   if (partes.length !== 2) return null;
@@ -150,7 +151,7 @@ function validarToken(token, rolEsperado) {
 
   try {
     const datos = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (datos.role !== rolEsperado || typeof datos.exp !== 'number' || Date.now() >= datos.exp) {
+    if (!datos.idUsuario || typeof datos.exp !== 'number' || Date.now() >= datos.exp) {
       return null;
     }
     return datos;
@@ -159,20 +160,18 @@ function validarToken(token, rolEsperado) {
   }
 }
 
-function requerirAdmin(req, res, next) {
+function extraerToken(req) {
+  const headerToken = req.headers['x-user-token'];
+  if (headerToken) return String(headerToken).trim();
   const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  if (!validarToken(token, 'admin')) {
-    return res.status(401).json({ ok: false, error: 'No autorizado' });
-  }
-  next();
+  if (authHeader.startsWith('Bearer ')) return authHeader.slice(7).trim();
+  return '';
 }
 
 async function requerirUsuarioActivo(req, res, next) {
-  const rawToken = req.headers['x-user-token'] || req.headers.authorization || '';
-  const token = String(rawToken).startsWith('Bearer ') ? String(rawToken).slice(7).trim() : String(rawToken).trim();
-  const datos = validarToken(token, 'user');
-  if (!datos || !datos.idUsuario) {
+  const token = extraerToken(req);
+  const datos = validarToken(token);
+  if (!datos) {
     return res.status(401).json({ ok: false, error: 'Debe iniciar sesión para subir archivos' });
   }
 
@@ -180,7 +179,7 @@ async function requerirUsuarioActivo(req, res, next) {
     const pool = await getPool();
     const r = await pool.request()
       .input('IdUsuario', sql.Int, datos.idUsuario)
-      .query('SELECT IdUsuario, Nombre, Correo, Estado FROM Usuarios WHERE IdUsuario = @IdUsuario');
+      .query('SELECT IdUsuario, Nombre, Correo, Estado, EsAdmin FROM Usuarios WHERE IdUsuario = @IdUsuario');
     const usuario = r.recordset[0];
     if (!usuario) {
       return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
@@ -195,6 +194,29 @@ async function requerirUsuarioActivo(req, res, next) {
     next();
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al validar sesión de usuario' });
+  }
+}
+
+async function requerirAdmin(req, res, next) {
+  const token = extraerToken(req);
+  const datos = validarToken(token);
+  if (!datos) {
+    return res.status(401).json({ ok: false, error: 'No autorizado' });
+  }
+
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('IdUsuario', sql.Int, datos.idUsuario)
+      .query('SELECT IdUsuario, Nombre, Correo, Estado, EsAdmin FROM Usuarios WHERE IdUsuario = @IdUsuario');
+    const usuario = r.recordset[0];
+    if (!usuario || usuario.Estado === 'baneado' || !usuario.EsAdmin) {
+      return res.status(403).json({ ok: false, error: 'Acceso restringido a administradores' });
+    }
+    req.usuario = usuario;
+    next();
+  } catch {
+    return res.status(500).json({ ok: false, error: 'Error al validar permisos de administrador' });
   }
 }
 
@@ -243,20 +265,24 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(409).json({ ok: false, error: 'Ese correo ya está registrado' });
     }
 
+    const esAdminInicial = INITIAL_ADMIN_EMAIL && correo === INITIAL_ADMIN_EMAIL ? 1 : 0;
     const passwordHash = hashPassword(password);
     const ins = await pool.request()
       .input('Nombre', sql.VarChar(120), nombre)
       .input('Correo', sql.VarChar(150), correo)
       .input('PasswordHash', sql.VarChar(255), passwordHash)
       .input('Estado', sql.VarChar(20), 'activo')
+      .input('EsAdmin', sql.Bit, esAdminInicial)
       .query(`
-        INSERT INTO Usuarios (Nombre, Correo, PasswordHash, Estado)
-        OUTPUT INSERTED.IdUsuario, INSERTED.Nombre, INSERTED.Correo, INSERTED.Estado
-        VALUES (@Nombre, @Correo, @PasswordHash, @Estado)
+        INSERT INTO Usuarios (Nombre, Correo, PasswordHash, Estado, EsAdmin)
+        OUTPUT INSERTED.IdUsuario, INSERTED.Nombre, INSERTED.Correo, INSERTED.Estado, INSERTED.EsAdmin
+        VALUES (@Nombre, @Correo, @PasswordHash, @Estado, @EsAdmin)
       `);
 
     const usuario = ins.recordset[0];
-    const token = crearToken({ role: 'user', idUsuario: usuario.IdUsuario, correo: usuario.Correo });
+    const esAdmin = Boolean(usuario.EsAdmin);
+    const token = crearToken({ idUsuario: usuario.IdUsuario });
+
     return res.json({
       ok: true,
       token,
@@ -264,7 +290,8 @@ app.post('/api/auth/register', async (req, res) => {
         idUsuario: usuario.IdUsuario,
         nombre: usuario.Nombre,
         correo: usuario.Correo,
-        estado: usuario.Estado
+        estado: usuario.Estado,
+        esAdmin
       },
       aviso: 'Recuerde subir únicamente archivos correspondientes. Subir contenido indebido o hacer spam resultará en baneo de su cuenta.'
     });
@@ -296,7 +323,7 @@ app.post('/api/auth/login', async (req, res) => {
     const pool = await getPool();
     const r = await pool.request()
       .input('Correo', sql.VarChar(150), correo)
-      .query('SELECT IdUsuario, Nombre, Correo, PasswordHash, Estado FROM Usuarios WHERE Correo = @Correo');
+      .query('SELECT IdUsuario, Nombre, Correo, PasswordHash, Estado, EsAdmin FROM Usuarios WHERE Correo = @Correo');
 
     const usuario = r.recordset[0];
     if (!usuario || !verificarPassword(password, usuario.PasswordHash)) {
@@ -311,8 +338,17 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    if (INITIAL_ADMIN_EMAIL && usuario.Correo.toLowerCase() === INITIAL_ADMIN_EMAIL && !usuario.EsAdmin) {
+      await pool.request()
+        .input('IdUsuario', sql.Int, usuario.IdUsuario)
+        .query('UPDATE Usuarios SET EsAdmin = 1 WHERE IdUsuario = @IdUsuario');
+      usuario.EsAdmin = true;
+    }
+
     limpiarIntentosLogin(ip);
-    const token = crearToken({ role: 'user', idUsuario: usuario.IdUsuario, correo: usuario.Correo });
+    const esAdmin = Boolean(usuario.EsAdmin);
+    const token = crearToken({ idUsuario: usuario.IdUsuario });
+
     return res.json({
       ok: true,
       token,
@@ -320,45 +356,14 @@ app.post('/api/auth/login', async (req, res) => {
         idUsuario: usuario.IdUsuario,
         nombre: usuario.Nombre,
         correo: usuario.Correo,
-        estado: usuario.Estado
+        estado: usuario.Estado,
+        esAdmin
       }
     });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ ok: false, error: 'Error al iniciar sesión' });
   }
-});
-
-app.post('/api/admin/login', (req, res) => {
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const estadoLimite = verificarLimiteLogin(ip);
-  if (!estadoLimite.permitido) {
-    return res.status(429).json({
-      ok: false,
-      error: `Demasiados intentos. Intente de nuevo en ${estadoLimite.segRestantes} segundos`
-    });
-  }
-
-  const { password } = req.body || {};
-  const adminPass = process.env.ADMIN_PASSWORD || 'admin1234';
-
-  if (typeof password !== 'string' || !password.length) {
-    registrarFalloLogin(ip);
-    return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
-  }
-
-  const bufInput = Buffer.from(password);
-  const bufAdmin = Buffer.from(adminPass);
-  const coincide = bufInput.length === bufAdmin.length && crypto.timingSafeEqual(bufInput, bufAdmin);
-
-  if (coincide) {
-    limpiarIntentosLogin(ip);
-    const token = crearToken({ role: 'admin' });
-    return res.json({ ok: true, token });
-  }
-
-  registrarFalloLogin(ip);
-  return res.status(401).json({ ok: false, error: 'Contraseña incorrecta' });
 });
 
 app.post('/api/candidatos', requerirUsuarioActivo, upload.single('archivoExpediente'), async (req, res) => {
@@ -444,6 +449,7 @@ app.get('/api/usuarios', requerirAdmin, async (req, res) => {
         Nombre,
         Correo,
         Estado,
+        EsAdmin,
         FORMAT(FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
       FROM Usuarios
       ORDER BY FechaRegistro DESC
@@ -466,6 +472,9 @@ app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
   if (!estadosPermitidos.includes(estado)) {
     return res.status(400).json({ ok: false, error: 'Estado no válido' });
   }
+  if (idUsuario === req.usuario.IdUsuario && estado === 'baneado') {
+    return res.status(400).json({ ok: false, error: 'No puede banear su propia cuenta activa' });
+  }
 
   try {
     const pool = await getPool();
@@ -477,6 +486,30 @@ app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Error al actualizar estado del usuario' });
+  }
+});
+
+app.put('/api/usuarios/:id/admin', requerirAdmin, async (req, res) => {
+  const idUsuario = parseIdEntero(req.params.id);
+  const { esAdmin } = req.body || {};
+
+  if (!idUsuario || typeof esAdmin !== 'boolean') {
+    return res.status(400).json({ ok: false, error: 'Datos inválidos para actualizar permiso de admin' });
+  }
+  if (idUsuario === req.usuario.IdUsuario && !esAdmin) {
+    return res.status(400).json({ ok: false, error: 'No puede quitarse su propio permiso de administrador' });
+  }
+
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('EsAdmin', sql.Bit, esAdmin ? 1 : 0)
+      .input('IdUsuario', sql.Int, idUsuario)
+      .query('UPDATE Usuarios SET EsAdmin = @EsAdmin WHERE IdUsuario = @IdUsuario');
+    res.json({ ok: true, esAdmin });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al actualizar permisos de administrador' });
   }
 });
 

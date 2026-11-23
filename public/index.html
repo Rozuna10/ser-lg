@@ -14,8 +14,8 @@
     </div>
     <nav>
       <span id="sesionInfo"></span>
+      <a href="/admin.html" id="linkAdmin" style="display:none;">Panel Admin</a>
       <button type="button" id="btnLogout" style="display:none;">Cerrar sesión</button>
-      <a href="/admin.html">Panel Admin</a>
     </nav>
   </header>
 
@@ -84,6 +84,7 @@
     const formSubida = document.getElementById('formSubida');
     const btnSubir = document.getElementById('btnSubir');
     const btnLogout = document.getElementById('btnLogout');
+    const linkAdmin = document.getElementById('linkAdmin');
     const sesionInfo = document.getElementById('sesionInfo');
     const usuarioActivoTexto = document.getElementById('usuarioActivoTexto');
     const mensajeGlobal = document.getElementById('mensajeGlobal');
@@ -122,12 +123,14 @@
         panelAuth.style.display = 'none';
         panelSubida.style.display = 'block';
         btnLogout.style.display = 'inline-block';
+        linkAdmin.style.display = usuario.esAdmin ? 'inline-block' : 'none';
         sesionInfo.textContent = `${usuario.nombre} (${usuario.correo})`;
         usuarioActivoTexto.textContent = `${usuario.nombre} — ${usuario.correo}`;
       } else {
         panelAuth.style.display = 'block';
         panelSubida.style.display = 'none';
         btnLogout.style.display = 'none';
+        linkAdmin.style.display = 'none';
         sesionInfo.textContent = '';
         usuarioActivoTexto.textContent = '';
       }
