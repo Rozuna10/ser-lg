@@ -22,7 +22,7 @@
     </nav>
   </header>
 
-  <main>
+  <main class="wide">
     <div id="adminMensaje" aria-live="polite"></div>
 
     <section id="adminLoginBox" style="display:none;">
@@ -43,8 +43,44 @@
     </section>
 
     <section id="adminPanel" style="display:none;">
+      <div class="kpi-container">
+        <div class="kpi-card">
+          <h3 id="kpiTotal">0</h3>
+          <p>Total Expedientes</p>
+        </div>
+        <div class="kpi-card">
+          <h3 id="kpiRevision">0</h3>
+          <p>En Revisión</p>
+        </div>
+        <div class="kpi-card">
+          <h3 id="kpiAprobados">0</h3>
+          <p>Aprobados</p>
+        </div>
+        <div class="kpi-card">
+          <h3 id="kpiRechazados">0</h3>
+          <p>Rechazados</p>
+        </div>
+      </div>
+
       <section>
-        <h2>Expedientes y archivos subidos</h2>
+        <div class="admin-toolbar">
+          <h2>Expedientes y archivos subidos</h2>
+          <div class="toolbar-actions">
+            <input type="text" id="filtroTexto" placeholder="Buscar por expediente, archivo o correo...">
+            <select id="filtroEstatus">
+              <option value="">Todos los estatus</option>
+              <option value="En revisión">En revisión</option>
+              <option value="Aprobado">Aprobado</option>
+              <option value="Rechazado">Rechazado</option>
+            </select>
+            <select id="filtroUsuarioEstado">
+              <option value="">Todos los usuarios</option>
+              <option value="activo">Usuarios activos</option>
+              <option value="baneado">Usuarios baneados</option>
+            </select>
+          </div>
+        </div>
+
         <table>
           <thead>
             <tr>
@@ -63,7 +99,18 @@
       </section>
 
       <section>
-        <h2>Usuarios registrados y permisos de admin</h2>
+        <div class="admin-toolbar">
+          <h2>Usuarios registrados y permisos de admin</h2>
+          <div class="toolbar-actions">
+            <input type="text" id="filtroUsuariosTexto" placeholder="Buscar usuario por nombre o correo...">
+            <select id="filtroUsuariosRol">
+              <option value="">Todos los roles</option>
+              <option value="admin">Solo Admin</option>
+              <option value="usuario">Solo Usuario</option>
+            </select>
+          </div>
+        </div>
+
         <table>
           <thead>
             <tr>
@@ -96,6 +143,20 @@
     const tablaUsuarios = document.getElementById('tablaUsuarios');
     const btnToggleModalPass = document.getElementById('btnToggleModalPass');
     const adminPassInput = document.getElementById('adminPass');
+
+    const kpiTotal = document.getElementById('kpiTotal');
+    const kpiRevision = document.getElementById('kpiRevision');
+    const kpiAprobados = document.getElementById('kpiAprobados');
+    const kpiRechazados = document.getElementById('kpiRechazados');
+
+    const filtroTexto = document.getElementById('filtroTexto');
+    const filtroEstatus = document.getElementById('filtroEstatus');
+    const filtroUsuarioEstado = document.getElementById('filtroUsuarioEstado');
+    const filtroUsuariosTexto = document.getElementById('filtroUsuariosTexto');
+    const filtroUsuariosRol = document.getElementById('filtroUsuariosRol');
+
+    let expedientesCache = [];
+    let usuariosCache = [];
 
     if (btnToggleModalPass && adminPassInput) {
       btnToggleModalPass.addEventListener('click', () => {
@@ -134,43 +195,60 @@
       };
     }
 
-    async function actualizarVistaAdmin() {
-      const { token, usuario } = getSesion();
+    function actualizarKPIs() {
+      const total = expedientesCache.length;
+      const revision = expedientesCache.filter((x) => (x.Estatus || 'En revisión') === 'En revisión').length;
+      const aprobados = expedientesCache.filter((x) => x.Estatus === 'Aprobado').length;
+      const rechazados = expedientesCache.filter((x) => x.Estatus === 'Rechazado').length;
 
-      if (!token || !usuario || !usuario.esAdmin) {
-        adminLoginBox.style.display = 'block';
-        adminPanel.style.display = 'none';
-        btnAdminLogout.style.display = 'none';
-        btnCsv.style.display = 'none';
-        if (token && usuario && !usuario.esAdmin) {
-          mostrarAdminMensaje('Su cuenta no tiene permisos para acceder al panel de administrador.', true);
-        }
-        return;
-      }
-
-      adminLoginBox.style.display = 'none';
-      adminPanel.style.display = 'block';
-      btnAdminLogout.style.display = 'inline-block';
-      btnCsv.style.display = 'inline-block';
-
-      await Promise.all([cargarExpedientes(), cargarUsuarios()]);
+      kpiTotal.textContent = total;
+      kpiRevision.textContent = revision;
+      kpiAprobados.textContent = aprobados;
+      kpiRechazados.textContent = rechazados;
     }
 
-    async function cargarExpedientes() {
-      const res = await fetch('/api/candidatos', { headers: authHeaders() });
-      if (res.status === 401 || res.status === 403) {
-        actualizarVistaAdmin();
-        return;
-      }
-      const filas = await res.json();
+    function renderizarExpedientes() {
+      const q = filtroTexto.value.trim().toLowerCase();
+      const est = filtroEstatus.value;
+      const uEst = filtroUsuarioEstado.value;
+
+      const filtrados = expedientesCache.filter((item) => {
+        const estatusItem = item.Estatus || 'En revisión';
+        const estadoUsuarioItem = item.EstadoUsuario || 'activo';
+
+        if (est && estatusItem !== est) return false;
+        if (uEst && estadoUsuarioItem !== uEst) return false;
+
+        if (q) {
+          const textoFila = [
+            item.IdCandidato,
+            item.Nombre,
+            item.NombreOriginal,
+            item.NombreUsuario,
+            item.CorreoUsuario
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (!textoFila.includes(q)) return false;
+        }
+        return true;
+      });
+
       tablaExpedientes.innerHTML = '';
 
-      filas.forEach((item) => {
+      if (filtrados.length === 0) {
+        tablaExpedientes.innerHTML = '<tr><td colspan="8">No hay expedientes que coincidan con el filtro.</td></tr>';
+        return;
+      }
+
+      filtrados.forEach((item) => {
         const tr = document.createElement('tr');
         const usuarioLabel = item.CorreoUsuario
           ? `${item.NombreUsuario || ''} (${item.CorreoUsuario})`.trim()
           : 'Sin usuario';
         const estaBaneado = item.EstadoUsuario === 'baneado';
+        const estatusActual = item.Estatus || 'En revisión';
 
         tr.innerHTML = `
           <td>${item.IdCandidato}</td>
@@ -180,9 +258,9 @@
           <td>${escapeHtml(item.EstadoUsuario || 'activo')}</td>
           <td>
             <select data-estatus-id="${item.IdCandidato}">
-              <option value="En revisión" ${item.Estatus === 'En revisión' ? 'selected' : ''}>En revisión</option>
-              <option value="Aprobado" ${item.Estatus === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
-              <option value="Rechazado" ${item.Estatus === 'Rechazado' ? 'selected' : ''}>Rechazado</option>
+              <option value="En revisión" ${estatusActual === 'En revisión' ? 'selected' : ''}>En revisión</option>
+              <option value="Aprobado" ${estatusActual === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
+              <option value="Rechazado" ${estatusActual === 'Rechazado' ? 'selected' : ''}>Rechazado</option>
             </select>
           </td>
           <td>${escapeHtml(item.FechaFormateada || '')}</td>
@@ -196,14 +274,31 @@
       });
     }
 
-    async function cargarUsuarios() {
-      const res = await fetch('/api/usuarios', { headers: authHeaders() });
-      if (!res.ok) return;
-      const usuarios = await res.json();
+    function renderizarUsuarios() {
+      const q = filtroUsuariosTexto.value.trim().toLowerCase();
+      const rol = filtroUsuariosRol.value;
       const { usuario: actual } = getSesion();
+
+      const filtrados = usuariosCache.filter((u) => {
+        const esAdmin = Boolean(u.EsAdmin);
+        if (rol === 'admin' && !esAdmin) return false;
+        if (rol === 'usuario' && esAdmin) return false;
+
+        if (q) {
+          const texto = `${u.IdUsuario} ${u.Nombre || ''} ${u.Correo || ''}`.toLowerCase();
+          if (!texto.includes(q)) return false;
+        }
+        return true;
+      });
+
       tablaUsuarios.innerHTML = '';
 
-      usuarios.forEach((u) => {
+      if (filtrados.length === 0) {
+        tablaUsuarios.innerHTML = '<tr><td colspan="7">No hay usuarios que coincidan con el filtro.</td></tr>';
+        return;
+      }
+
+      filtrados.forEach((u) => {
         const tr = document.createElement('tr');
         const estaBaneado = u.Estado === 'baneado';
         const esAdmin = Boolean(u.EsAdmin);
@@ -225,6 +320,46 @@
       });
     }
 
+    async function actualizarVistaAdmin() {
+      const { token, usuario } = getSesion();
+
+      if (!token || !usuario || !usuario.esAdmin) {
+        adminLoginBox.style.display = 'block';
+        adminPanel.style.display = 'none';
+        btnAdminLogout.style.display = 'none';
+        btnCsv.style.display = 'none';
+        if (token && usuario && !usuario.esAdmin) {
+          mostrarAdminMensaje('Su cuenta no tiene permisos para acceder al panel de administrador.', true);
+        }
+        return;
+      }
+
+      adminLoginBox.style.display = 'none';
+      adminPanel.style.display = 'flex';
+      btnAdminLogout.style.display = 'inline-block';
+      btnCsv.style.display = 'inline-block';
+
+      await Promise.all([cargarExpedientes(), cargarUsuarios()]);
+    }
+
+    async function cargarExpedientes() {
+      const res = await fetch('/api/candidatos', { headers: authHeaders() });
+      if (res.status === 401 || res.status === 403) {
+        actualizarVistaAdmin();
+        return;
+      }
+      expedientesCache = await res.json();
+      actualizarKPIs();
+      renderizarExpedientes();
+    }
+
+    async function cargarUsuarios() {
+      const res = await fetch('/api/usuarios', { headers: authHeaders() });
+      if (!res.ok) return;
+      usuariosCache = await res.json();
+      renderizarUsuarios();
+    }
+
     function escapeHtml(str) {
       return String(str).replace(/[&<>"']/g, (m) => ({
         '&': '&amp;',
@@ -234,6 +369,12 @@
         "'": '&#39;'
       }[m]));
     }
+
+    filtroTexto.addEventListener('input', renderizarExpedientes);
+    filtroEstatus.addEventListener('change', renderizarExpedientes);
+    filtroUsuarioEstado.addEventListener('change', renderizarExpedientes);
+    filtroUsuariosTexto.addEventListener('input', renderizarUsuarios);
+    filtroUsuariosRol.addEventListener('change', renderizarUsuarios);
 
     formAdminLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -287,14 +428,22 @@
     tablaExpedientes.addEventListener('change', async (e) => {
       const sel = e.target.closest('select[data-estatus-id]');
       if (!sel) return;
-      const id = sel.getAttribute('data-estatus-id');
+      const id = Number(sel.getAttribute('data-estatus-id'));
+      const nuevoEstatus = sel.value;
       const res = await fetch(`/api/candidatos/${id}/estatus`, {
         method: 'PUT',
         headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ estatus: sel.value })
+        body: JSON.stringify({ estatus: nuevoEstatus })
       });
-      if (res.ok) mostrarAdminMensaje('Estatus actualizado.', false);
-      else mostrarAdminMensaje('No se pudo actualizar el estatus.', true);
+      if (res.ok) {
+        const item = expedientesCache.find((x) => x.IdCandidato === id);
+        if (item) item.Estatus = nuevoEstatus;
+        actualizarKPIs();
+        renderizarExpedientes();
+        mostrarAdminMensaje('Estatus actualizado.', false);
+      } else {
+        mostrarAdminMensaje('No se pudo actualizar el estatus.', true);
+      }
     });
 
     document.addEventListener('click', async (e) => {
@@ -357,14 +506,16 @@
 
       const delBtn = e.target.closest('button[data-del-id]');
       if (delBtn) {
-        const id = delBtn.getAttribute('data-del-id');
+        const id = Number(delBtn.getAttribute('data-del-id'));
         const res = await fetch(`/api/candidatos/${id}`, {
           method: 'DELETE',
           headers: authHeaders()
         });
         if (res.ok) {
+          expedientesCache = expedientesCache.filter((x) => x.IdCandidato !== id);
+          actualizarKPIs();
+          renderizarExpedientes();
           mostrarAdminMensaje('Expediente eliminado.', false);
-          await cargarExpedientes();
         } else {
           mostrarAdminMensaje('Error al eliminar expediente.', true);
         }
