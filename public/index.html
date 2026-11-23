@@ -24,7 +24,7 @@
 
   <main>
     <div id="avisoSeguridad" role="alert">
-      <strong>Aviso importante:</strong> Suba únicamente archivos correspondientes al trámite (PDF, JPG o PNG, máximo 10 MB). Subir contenido ajeno, imágenes indebidas o hacer spam queda registrado a su cuenta y puede derivar en el baneo permanente de su usuario.
+      <strong>Aviso importante:</strong> Suba únicamente archivos correspondientes al trámite (PDF, JPG o PNG, máximo 10 MB). Si hay algún error o falta información en su papelería, será contactado a través de su correo electrónico o número de teléfono registrado. Subir contenido ajeno o hacer spam queda registrado en su cuenta y puede derivar en baneo.
     </div>
 
     <div id="mensajeGlobal" aria-live="polite"></div>
@@ -37,8 +37,8 @@
 
       <form id="formLogin">
         <h2>Iniciar sesión</h2>
-        <label for="loginCorreo">Correo electrónico</label>
-        <input type="email" id="loginCorreo" name="correo" required autocomplete="email">
+        <label for="loginIdentificador">Correo electrónico o número de teléfono</label>
+        <input type="text" id="loginIdentificador" name="identificador" placeholder="correo@ejemplo.com o 8112345678" required autocomplete="username">
 
         <label for="loginPassword">Contraseña</label>
         <div class="password-container">
@@ -57,10 +57,19 @@
         <label for="regCorreo">Correo electrónico</label>
         <input type="email" id="regCorreo" name="correo" required autocomplete="email">
 
+        <label for="regTelefono">Número de teléfono</label>
+        <input type="text" id="regTelefono" name="telefono" placeholder="Ej. 8112345678" required autocomplete="tel">
+
         <label for="regPassword">Contraseña (mínimo 6 caracteres)</label>
         <div class="password-container">
           <input type="password" id="regPassword" name="password" minlength="6" required autocomplete="new-password">
           <button type="button" id="btnTogglePass" data-target="regPassword">Ver</button>
+        </div>
+
+        <label for="regConfirmarPassword">Confirmar contraseña</label>
+        <div class="password-container">
+          <input type="password" id="regConfirmarPassword" name="confirmarPassword" minlength="6" required autocomplete="new-password">
+          <button type="button" id="btnTogglePass" data-target="regConfirmarPassword">Ver</button>
         </div>
 
         <button type="submit">Registrarme</button>
@@ -78,7 +87,64 @@
         <button type="submit" id="btnSubir">Enviar archivo</button>
       </form>
     </section>
+
+    <section id="panelMisExpedientes" class="card" style="display:none;">
+      <div class="admin-toolbar">
+        <h2>Mis expedientes, estatus y observaciones</h2>
+        <button type="button" class="btn-secondary" id="btnActualizarEstatus">Actualizar estatus</button>
+      </div>
+      <p class="section-desc" style="margin-bottom:18px;">
+        Aquí puede consultar el estatus de su papelería, el motivo u observación del revisor y si ya fue contactado por correo o teléfono.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Folio</th>
+            <th>Archivo</th>
+            <th>Estatus</th>
+            <th>Motivo / Observación</th>
+            <th>Contacto</th>
+            <th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody id="tablaMisExpedientes"></tbody>
+      </table>
+    </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">SER-LG — Recepción Documental</div>
+          <p class="footer-copy">
+            Plataforma de recepción y seguimiento de expedientes y documentación para trámites administrativos.
+          </p>
+        </div>
+        <div>
+          <h3 class="footer-title">Notificaciones</h3>
+          <ul class="footer-list">
+            <li>Revisión sujeta a validación administrativa.</li>
+            <li>Si falta papelería o hay error, se notificará por correo o teléfono.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="footer-title">Requisitos</h3>
+          <ul class="footer-list">
+            <li>Formatos: PDF, JPG y PNG.</li>
+            <li>Tamaño máximo: 10 MB por archivo.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-notice">
+        <strong>Aviso:</strong> Mantenga actualizados su correo electrónico y número de teléfono para recibir avisos sobre el estado de su trámite.
+      </div>
+      <div class="footer-bottom" style="margin-top:16px;">
+        <span>SER-LG</span>
+        <span>Soporte y control documental</span>
+      </div>
+    </div>
+  </footer>
 
   <script>
     const TOKEN_KEY = 'serlg_user_token';
@@ -86,6 +152,9 @@
 
     const panelAuth = document.getElementById('panelAuth');
     const panelSubida = document.getElementById('panelSubida');
+    const panelMisExpedientes = document.getElementById('panelMisExpedientes');
+    const tablaMisExpedientes = document.getElementById('tablaMisExpedientes');
+    const btnActualizarEstatus = document.getElementById('btnActualizarEstatus');
     const tabLogin = document.getElementById('tabLogin');
     const tabRegistro = document.getElementById('tabRegistro');
     const formLogin = document.getElementById('formLogin');
@@ -107,6 +176,16 @@
         btn.textContent = esPassword ? 'Ocultar' : 'Ver';
       });
     });
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/[&<>"']/g, (m) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[m]));
+    }
 
     function mostrarMensaje(texto, esError) {
       mensajeGlobal.textContent = texto || '';
@@ -136,22 +215,81 @@
       actualizarVistaSesion();
     }
 
-    function actualizarVistaSesion() {
+    function formatearContactoUsuario(item) {
+      const medio = item.MedioContacto === 'telefono' ? 'teléfono' : (item.MedioContacto === 'correo' ? 'correo' : '');
+      const destino = item.MedioContacto === 'telefono'
+        ? (item.TelefonoContacto || '')
+        : (item.CorreoContacto || '');
+
+      if (item.ContactoEnviado) {
+        const detalle = [medio && `por ${medio}`, destino && `(${destino})`, item.FechaContactoFormateada]
+          .filter(Boolean)
+          .join(' ');
+        return `Contactado ${detalle}`;
+      }
+
+      const canales = [item.CorreoContacto, item.TelefonoContacto].filter(Boolean).join(' / ');
+      return canales
+        ? `Pendiente — si hay error se contactará a: ${canales}`
+        : 'Pendiente de revisión';
+    }
+
+    async function cargarMisExpedientes() {
+      const { token } = obtenerSesion();
+      if (!token) return;
+
+      try {
+        const res = await fetch('/api/mis-expedientes', {
+          headers: { 'x-user-token': token }
+        });
+        if (!res.ok) return;
+        const rows = await res.json();
+        tablaMisExpedientes.innerHTML = '';
+
+        if (!rows.length) {
+          tablaMisExpedientes.innerHTML = '<tr><td colspan="6">Aún no ha subido expedientes.</td></tr>';
+          return;
+        }
+
+        rows.forEach((item) => {
+          const tr = document.createElement('tr');
+          const motivo = (item.ObservacionAdmin || '').trim() || 'Sin observaciones por el momento.';
+          tr.innerHTML = `
+            <td>#${item.IdCandidato}</td>
+            <td>${escapeHtml(item.NombreOriginal || item.Nombre || '')}</td>
+            <td><strong>${escapeHtml(item.Estatus || 'En revisión')}</strong></td>
+            <td>${escapeHtml(motivo)}</td>
+            <td>${escapeHtml(formatearContactoUsuario(item))}</td>
+            <td>${escapeHtml(item.FechaFormateada || '')}</td>
+          `;
+          tablaMisExpedientes.appendChild(tr);
+        });
+      } catch {
+        // Silencioso para no interrumpir la vista principal
+      }
+    }
+
+    async function actualizarVistaSesion() {
       const { token, usuario } = obtenerSesion();
       if (token && usuario) {
         panelAuth.style.display = 'none';
         panelSubida.style.display = 'block';
+        panelMisExpedientes.style.display = 'block';
         btnLogout.style.display = 'inline-block';
         linkAdmin.style.display = usuario.esAdmin ? 'inline-block' : 'none';
-        sesionInfo.textContent = `${usuario.nombre} (${usuario.correo})`;
+        const contactoExtra = usuario.telefono ? ` | Tel: ${usuario.telefono}` : '';
+        sesionInfo.textContent = `${usuario.nombre} (${usuario.correo}${contactoExtra})`;
         usuarioActivoTexto.textContent = `${usuario.nombre} — ${usuario.correo}`;
+        await cargarMisExpedientes();
       } else {
         panelAuth.style.display = 'block';
         panelSubida.style.display = 'none';
+        panelMisExpedientes.style.display = 'none';
         btnLogout.style.display = 'none';
         linkAdmin.style.display = 'none';
         sesionInfo.textContent = '';
         usuarioActivoTexto.textContent = '';
+        tablaMisExpedientes.innerHTML = '';
       }
     }
 
@@ -172,17 +310,19 @@
       mostrarMensaje('Sesión cerrada.', false);
     });
 
+    btnActualizarEstatus.addEventListener('click', cargarMisExpedientes);
+
     formLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
       mostrarMensaje('', false);
-      const correo = document.getElementById('loginCorreo').value.trim();
+      const identificador = document.getElementById('loginIdentificador').value.trim();
       const password = document.getElementById('loginPassword').value;
 
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ correo, password })
+          body: JSON.stringify({ identificador, password })
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
@@ -202,13 +342,20 @@
       mostrarMensaje('', false);
       const nombre = document.getElementById('regNombre').value.trim();
       const correo = document.getElementById('regCorreo').value.trim();
+      const telefono = document.getElementById('regTelefono').value.trim();
       const password = document.getElementById('regPassword').value;
+      const confirmarPassword = document.getElementById('regConfirmarPassword').value;
+
+      if (password !== confirmarPassword) {
+        mostrarMensaje('Las contraseñas no coinciden.', true);
+        return;
+      }
 
       try {
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre, correo, password })
+          body: JSON.stringify({ nombre, correo, telefono, password, confirmarPassword })
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
@@ -259,6 +406,7 @@
         }
         formSubida.reset();
         mostrarMensaje(`Archivo enviado correctamente (Folio #${data.idCandidato}).`, false);
+        await cargarMisExpedientes();
       } catch {
         mostrarMensaje('Error de conexión al enviar el archivo', true);
       } finally {

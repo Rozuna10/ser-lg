@@ -11,6 +11,7 @@ const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 8;
 const INITIAL_ADMIN_EMAIL = (process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PRINCIPAL_EMAIL = INITIAL_ADMIN_EMAIL || 'lunaluisronaldo@gmail.com';
 
 const dbConfig = {
   user: process.env.DB_USER,
@@ -33,6 +34,34 @@ function getPool() {
     });
   }
   return poolPromise;
+}
+
+const usuarioCache = new Map();
+const USUARIO_CACHE_TTL_MS = 15000;
+
+function obtenerUsuarioCache(idUsuario) {
+  const item = usuarioCache.get(idUsuario);
+  if (!item) return null;
+  if (Date.now() > item.exp) {
+    usuarioCache.delete(idUsuario);
+    return null;
+  }
+  return item.data;
+}
+
+function guardarUsuarioCache(idUsuario, data) {
+  usuarioCache.set(idUsuario, {
+    data,
+    exp: Date.now() + USUARIO_CACHE_TTL_MS
+  });
+}
+
+function invalidarUsuarioCache(idUsuario) {
+  if (idUsuario) {
+    usuarioCache.delete(Number(idUsuario));
+  } else {
+    usuarioCache.clear();
+  }
 }
 
 const uploadDir = path.join(__dirname, 'uploads');
@@ -62,6 +91,18 @@ const MAX_INTENTOS = 5;
 const VENTANA_MS = 60 * 1000;
 const BLOQUEO_MS = 5 * 60 * 1000;
 const MAX_SUBIDAS_MIN = 8;
+
+function normalizarTelefono(valor) {
+  return String(valor || '').replace(/\D+/g, '').trim();
+}
+
+function esAdminPrincipal(usuario) {
+  return Boolean(
+    usuario &&
+    usuario.EsAdmin &&
+    String(usuario.Correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL
+  );
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -168,19 +209,30 @@ function extraerToken(req) {
   return '';
 }
 
+async function obtenerUsuarioValidado(idUsuario) {
+  const cached = obtenerUsuarioCache(idUsuario);
+  if (cached) return cached;
+
+  const pool = await getPool();
+  const r = await pool.request()
+    .input('IdUsuario', sql.Int, idUsuario)
+    .query('SELECT IdUsuario, Nombre, Correo, Telefono, Estado, EsAdmin FROM Usuarios WHERE IdUsuario = @IdUsuario');
+  const usuario = r.recordset[0] || null;
+  if (usuario) {
+    guardarUsuarioCache(idUsuario, usuario);
+  }
+  return usuario;
+}
+
 async function requerirUsuarioActivo(req, res, next) {
   const token = extraerToken(req);
   const datos = validarToken(token);
   if (!datos) {
-    return res.status(401).json({ ok: false, error: 'Debe iniciar sesión para subir archivos' });
+    return res.status(401).json({ ok: false, error: 'Debe iniciar sesión para continuar' });
   }
 
   try {
-    const pool = await getPool();
-    const r = await pool.request()
-      .input('IdUsuario', sql.Int, datos.idUsuario)
-      .query('SELECT IdUsuario, Nombre, Correo, Estado, EsAdmin FROM Usuarios WHERE IdUsuario = @IdUsuario');
-    const usuario = r.recordset[0];
+    const usuario = await obtenerUsuarioValidado(datos.idUsuario);
     if (!usuario) {
       return res.status(401).json({ ok: false, error: 'Usuario no encontrado' });
     }
@@ -205,11 +257,7 @@ async function requerirAdmin(req, res, next) {
   }
 
   try {
-    const pool = await getPool();
-    const r = await pool.request()
-      .input('IdUsuario', sql.Int, datos.idUsuario)
-      .query('SELECT IdUsuario, Nombre, Correo, Estado, EsAdmin FROM Usuarios WHERE IdUsuario = @IdUsuario');
-    const usuario = r.recordset[0];
+    const usuario = await obtenerUsuarioValidado(datos.idUsuario);
     if (!usuario || usuario.Estado === 'baneado' || !usuario.EsAdmin) {
       return res.status(403).json({ ok: false, error: 'Acceso restringido a administradores' });
     }
@@ -243,7 +291,9 @@ app.use('/uploads', requerirAdmin, express.static(uploadDir));
 app.post('/api/auth/register', async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   const correo = String(req.body?.correo || '').trim().toLowerCase();
+  const telefono = normalizarTelefono(req.body?.telefono);
   const password = String(req.body?.password || '');
+  const confirmarPassword = String(req.body?.confirmarPassword || '');
 
   if (nombre.length < 2 || nombre.length > 120) {
     return res.status(400).json({ ok: false, error: 'Ingrese un nombre válido' });
@@ -251,18 +301,29 @@ app.post('/api/auth/register', async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo) || correo.length > 150) {
     return res.status(400).json({ ok: false, error: 'Ingrese un correo válido' });
   }
+  if (telefono.length < 8 || telefono.length > 15) {
+    return res.status(400).json({ ok: false, error: 'Ingrese un número de teléfono válido (8 a 15 dígitos)' });
+  }
   if (password.length < 6) {
     return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+  if (password !== confirmarPassword) {
+    return res.status(400).json({ ok: false, error: 'Las contraseñas no coinciden' });
   }
 
   try {
     const pool = await getPool();
     const existe = await pool.request()
       .input('Correo', sql.VarChar(150), correo)
-      .query('SELECT IdUsuario FROM Usuarios WHERE Correo = @Correo');
+      .input('Telefono', sql.VarChar(20), telefono)
+      .query('SELECT IdUsuario, Correo, Telefono FROM Usuarios WHERE Correo = @Correo OR Telefono = @Telefono');
 
     if (existe.recordset.length > 0) {
-      return res.status(409).json({ ok: false, error: 'Ese correo ya está registrado' });
+      const duplicado = existe.recordset[0];
+      if (String(duplicado.Correo || '').toLowerCase() === correo) {
+        return res.status(409).json({ ok: false, error: 'Ese correo ya está registrado' });
+      }
+      return res.status(409).json({ ok: false, error: 'Ese número de teléfono ya está registrado' });
     }
 
     const esAdminInicial = INITIAL_ADMIN_EMAIL && correo === INITIAL_ADMIN_EMAIL ? 1 : 0;
@@ -270,13 +331,14 @@ app.post('/api/auth/register', async (req, res) => {
     const ins = await pool.request()
       .input('Nombre', sql.VarChar(120), nombre)
       .input('Correo', sql.VarChar(150), correo)
+      .input('Telefono', sql.VarChar(20), telefono)
       .input('PasswordHash', sql.VarChar(255), passwordHash)
       .input('Estado', sql.VarChar(20), 'activo')
       .input('EsAdmin', sql.Bit, esAdminInicial)
       .query(`
-        INSERT INTO Usuarios (Nombre, Correo, PasswordHash, Estado, EsAdmin)
-        OUTPUT INSERTED.IdUsuario, INSERTED.Nombre, INSERTED.Correo, INSERTED.Estado, INSERTED.EsAdmin
-        VALUES (@Nombre, @Correo, @PasswordHash, @Estado, @EsAdmin)
+        INSERT INTO Usuarios (Nombre, Correo, Telefono, PasswordHash, Estado, EsAdmin)
+        OUTPUT INSERTED.IdUsuario, INSERTED.Nombre, INSERTED.Correo, INSERTED.Telefono, INSERTED.Estado, INSERTED.EsAdmin
+        VALUES (@Nombre, @Correo, @Telefono, @PasswordHash, @Estado, @EsAdmin)
       `);
 
     const usuario = ins.recordset[0];
@@ -290,10 +352,11 @@ app.post('/api/auth/register', async (req, res) => {
         idUsuario: usuario.IdUsuario,
         nombre: usuario.Nombre,
         correo: usuario.Correo,
+        telefono: usuario.Telefono,
         estado: usuario.Estado,
         esAdmin
       },
-      aviso: 'Recuerde subir únicamente archivos correspondientes. Subir contenido indebido o hacer spam resultará en baneo de su cuenta.'
+      aviso: 'Recuerde subir únicamente archivos correspondientes. Si hay algún error o falta información en su papelería, será contactado por su correo o número de teléfono.'
     });
   } catch (e) {
     console.error(e);
@@ -311,24 +374,39 @@ app.post('/api/auth/login', async (req, res) => {
     });
   }
 
-  const correo = String(req.body?.correo || '').trim().toLowerCase();
+  const identificador = String(req.body?.identificador || req.body?.correo || '').trim();
   const password = String(req.body?.password || '');
 
-  if (!correo || !password) {
+  if (!identificador || !password) {
     registrarFalloLogin(ip);
     return res.status(401).json({ ok: false, error: 'Credenciales inválidas' });
+  }
+
+  const esCorreo = identificador.includes('@');
+  const correoLimpio = esCorreo ? identificador.toLowerCase() : '';
+  const telefonoLimpio = !esCorreo ? normalizarTelefono(identificador) : '';
+
+  if (!correoLimpio && !telefonoLimpio) {
+    registrarFalloLogin(ip);
+    return res.status(401).json({ ok: false, error: 'Ingrese un correo o número de teléfono válido' });
   }
 
   try {
     const pool = await getPool();
     const r = await pool.request()
-      .input('Correo', sql.VarChar(150), correo)
-      .query('SELECT IdUsuario, Nombre, Correo, PasswordHash, Estado, EsAdmin FROM Usuarios WHERE Correo = @Correo');
+      .input('Correo', sql.VarChar(150), correoLimpio)
+      .input('Telefono', sql.VarChar(20), telefonoLimpio)
+      .query(`
+        SELECT IdUsuario, Nombre, Correo, Telefono, PasswordHash, Estado, EsAdmin
+        FROM Usuarios
+        WHERE (@Correo <> '' AND Correo = @Correo)
+           OR (@Telefono <> '' AND Telefono = @Telefono)
+      `);
 
     const usuario = r.recordset[0];
     if (!usuario || !verificarPassword(password, usuario.PasswordHash)) {
       registrarFalloLogin(ip);
-      return res.status(401).json({ ok: false, error: 'Correo o contraseña incorrectos' });
+      return res.status(401).json({ ok: false, error: 'Correo/teléfono o contraseña incorrectos' });
     }
 
     if (usuario.Estado === 'baneado') {
@@ -345,6 +423,7 @@ app.post('/api/auth/login', async (req, res) => {
       usuario.EsAdmin = true;
     }
 
+    guardarUsuarioCache(usuario.IdUsuario, usuario);
     limpiarIntentosLogin(ip);
     const esAdmin = Boolean(usuario.EsAdmin);
     const token = crearToken({ idUsuario: usuario.IdUsuario });
@@ -356,6 +435,7 @@ app.post('/api/auth/login', async (req, res) => {
         idUsuario: usuario.IdUsuario,
         nombre: usuario.Nombre,
         correo: usuario.Correo,
+        telefono: usuario.Telefono,
         estado: usuario.Estado,
         esAdmin
       }
@@ -363,6 +443,38 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ ok: false, error: 'Error al iniciar sesión' });
+  }
+});
+
+app.get('/api/mis-expedientes', requerirUsuarioActivo, async (req, res) => {
+  try {
+    const pool = await getPool();
+    const r = await pool.request()
+      .input('IdUsuario', sql.Int, req.usuario.IdUsuario)
+      .input('CorreoUsuario', sql.VarChar(150), req.usuario.Correo)
+      .query(`
+        SELECT
+          c.IdCandidato,
+          c.Nombre,
+          c.Estatus,
+          c.ObservacionAdmin,
+          c.ContactoEnviado,
+          c.MedioContacto,
+          FORMAT(c.FechaContacto, 'dd/MM/yyyy hh:mm tt') AS FechaContactoFormateada,
+          FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada,
+          d.NombreOriginal,
+          COALESCE(u.Correo, d.CorreoUsuario, @CorreoUsuario) AS CorreoContacto,
+          u.Telefono AS TelefonoContacto
+        FROM Candidatos c
+        INNER JOIN Documentos d ON c.IdCandidato = d.IdCandidato
+        LEFT JOIN Usuarios u ON d.IdUsuario = u.IdUsuario
+        WHERE d.IdUsuario = @IdUsuario OR LOWER(d.CorreoUsuario) = LOWER(@CorreoUsuario)
+        ORDER BY c.FechaRegistro DESC
+      `);
+    res.json(r.recordset);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al consultar sus expedientes' });
   }
 });
 
@@ -422,11 +534,15 @@ app.get('/api/candidatos', requerirAdmin, async (req, res) => {
         c.Nombre, 
         c.Estatus, 
         c.ObservacionAdmin,
+        c.ContactoEnviado,
+        c.MedioContacto,
+        FORMAT(c.FechaContacto, 'dd/MM/yyyy hh:mm tt') AS FechaContactoFormateada,
         FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada,
         d.MimeType,
         d.NombreOriginal,
         d.IdUsuario,
         COALESCE(u.Correo, d.CorreoUsuario) AS CorreoUsuario,
+        u.Telefono AS TelefonoUsuario,
         u.Nombre AS NombreUsuario,
         COALESCE(u.Estado, 'activo') AS EstadoUsuario
       FROM Candidatos c
@@ -449,13 +565,14 @@ app.get('/api/usuarios', requerirAdmin, async (req, res) => {
         u.IdUsuario,
         u.Nombre,
         u.Correo,
+        u.Telefono,
         u.Estado,
         u.EsAdmin,
         COUNT(d.IdDocumento) AS TotalEnvios,
         FORMAT(u.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
       FROM Usuarios u
       LEFT JOIN Documentos d ON d.IdUsuario = u.IdUsuario
-      GROUP BY u.IdUsuario, u.Nombre, u.Correo, u.Estado, u.EsAdmin, u.FechaRegistro
+      GROUP BY u.IdUsuario, u.Nombre, u.Correo, u.Telefono, u.Estado, u.EsAdmin, u.FechaRegistro
       ORDER BY u.FechaRegistro DESC
     `);
     res.json(r.recordset);
@@ -486,6 +603,7 @@ app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
       .input('Estado', sql.VarChar(20), estado)
       .input('IdUsuario', sql.Int, idUsuario)
       .query('UPDATE Usuarios SET Estado = @Estado WHERE IdUsuario = @IdUsuario');
+    invalidarUsuarioCache(idUsuario);
     res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -494,6 +612,13 @@ app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
 });
 
 app.put('/api/usuarios/:id/admin', requerirAdmin, async (req, res) => {
+  if (!esAdminPrincipal(req.usuario)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Solo el administrador principal puede otorgar o revocar permisos de administrador'
+    });
+  }
+
   const idUsuario = parseIdEntero(req.params.id);
   const { esAdmin } = req.body || {};
 
@@ -506,10 +631,24 @@ app.put('/api/usuarios/:id/admin', requerirAdmin, async (req, res) => {
 
   try {
     const pool = await getPool();
+    const targetRes = await pool.request()
+      .input('IdUsuario', sql.Int, idUsuario)
+      .query('SELECT IdUsuario, Correo FROM Usuarios WHERE IdUsuario = @IdUsuario');
+    const targetUser = targetRes.recordset[0];
+
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+    if (String(targetUser.Correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL && !esAdmin) {
+      return res.status(400).json({ ok: false, error: 'No se puede revocar el rol al administrador principal' });
+    }
+
     await pool.request()
       .input('EsAdmin', sql.Bit, esAdmin ? 1 : 0)
       .input('IdUsuario', sql.Int, idUsuario)
       .query('UPDATE Usuarios SET EsAdmin = @EsAdmin WHERE IdUsuario = @IdUsuario');
+
+    invalidarUsuarioCache(idUsuario);
     res.json({ ok: true, esAdmin });
   } catch (e) {
     console.error(e);
@@ -525,7 +664,11 @@ app.get('/api/exportar/csv', requerirAdmin, async (req, res) => {
         c.IdCandidato, 
         c.Nombre, 
         c.Estatus, 
+        c.ObservacionAdmin,
+        c.ContactoEnviado,
+        c.MedioContacto,
         COALESCE(u.Correo, d.CorreoUsuario) AS CorreoUsuario,
+        u.Telefono AS TelefonoUsuario,
         FORMAT(c.FechaRegistro, 'dd/MM/yyyy hh:mm tt') AS FechaFormateada
       FROM Candidatos c
       LEFT JOIN Documentos d ON c.IdCandidato = d.IdCandidato
@@ -535,13 +678,17 @@ app.get('/api/exportar/csv', requerirAdmin, async (req, res) => {
 
     const escapar = (val) => `"${String(val ?? '').replace(/"/g, '""')}"`;
 
-    let csv = '\uFEFFID,Nombre,Estatus,Usuario,Fecha de Registro\n';
+    let csv = '\uFEFFID,Nombre,Estatus,Observacion,Contactado,Medio,Correo,Telefono,Fecha de Registro\n';
     r.recordset.forEach((row) => {
       csv += [
         escapar(row.IdCandidato),
         escapar(row.Nombre),
         escapar(row.Estatus),
+        escapar(row.ObservacionAdmin || ''),
+        escapar(row.ContactoEnviado ? 'Sí' : 'No'),
+        escapar(row.MedioContacto || ''),
         escapar(row.CorreoUsuario),
+        escapar(row.TelefonoUsuario || ''),
         escapar(row.FechaFormateada)
       ].join(',') + '\n';
     });
@@ -603,6 +750,38 @@ app.put('/api/candidatos/:id/observacion', requerirAdmin, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Error al guardar la observación' });
+  }
+});
+
+app.put('/api/candidatos/:id/contacto', requerirAdmin, async (req, res) => {
+  const idCandidato = parseIdEntero(req.params.id);
+  const medio = String(req.body?.medio || '').trim().toLowerCase();
+  const mediosPermitidos = ['correo', 'telefono'];
+
+  if (!idCandidato) {
+    return res.status(400).json({ ok: false, error: 'ID inválido' });
+  }
+  if (!mediosPermitidos.includes(medio)) {
+    return res.status(400).json({ ok: false, error: 'Medio de contacto no válido' });
+  }
+
+  try {
+    const pool = await getPool();
+    await pool.request()
+      .input('MedioContacto', sql.VarChar(20), medio)
+      .input('IdCandidato', sql.Int, idCandidato)
+      .query(`
+        UPDATE Candidatos
+        SET ContactoEnviado = 1,
+            MedioContacto = @MedioContacto,
+            FechaContacto = GETDATE()
+        WHERE IdCandidato = @IdCandidato
+      `);
+
+    res.json({ ok: true, medio });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Error al registrar el contacto' });
   }
 });
 

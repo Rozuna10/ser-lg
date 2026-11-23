@@ -29,8 +29,8 @@
       <h2>Acceso administrador</h2>
       <p>Inicie sesión con una cuenta que tenga permisos de administrador.</p>
       <form id="formAdminLogin">
-        <label for="adminCorreo">Correo electrónico</label>
-        <input type="email" id="adminCorreo" name="correo" required autocomplete="email">
+        <label for="adminCorreo">Correo electrónico o teléfono</label>
+        <input type="text" id="adminCorreo" name="identificador" required autocomplete="username">
 
         <label for="adminPass">Contraseña</label>
         <div class="password-container">
@@ -66,7 +66,7 @@
         <div class="admin-toolbar">
           <h2>Expedientes y archivos subidos</h2>
           <div class="toolbar-actions">
-            <input type="text" id="filtroTexto" placeholder="Buscar por expediente, archivo, correo o nota...">
+            <input type="text" id="filtroTexto" placeholder="Buscar por expediente, archivo, correo, teléfono o nota...">
             <select id="filtroEstatus">
               <option value="">Todos los estatus</option>
               <option value="En revisión">En revisión</option>
@@ -104,7 +104,7 @@
         <div class="admin-toolbar">
           <h2>Usuarios registrados y permisos de admin</h2>
           <div class="toolbar-actions">
-            <input type="text" id="filtroUsuariosTexto" placeholder="Buscar usuario por nombre o correo...">
+            <input type="text" id="filtroUsuariosTexto" placeholder="Buscar usuario por nombre, correo o teléfono...">
             <select id="filtroUsuariosRol">
               <option value="">Todos los roles</option>
               <option value="admin">Solo Admin</option>
@@ -120,6 +120,7 @@
               <th>ID</th>
               <th>Nombre</th>
               <th>Correo</th>
+              <th>Teléfono</th>
               <th>Envíos</th>
               <th>Estado</th>
               <th>Rol</th>
@@ -132,6 +133,15 @@
       </section>
     </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-bottom footer-bottom--centered">
+        <span>SER-LG — Panel de Administración</span>
+        <span>Gestión de expedientes y usuarios</span>
+      </div>
+    </div>
+  </footer>
 
   <div id="modalConfirmar" class="modal" style="display:none;">
     <div class="modal-content small">
@@ -157,9 +167,10 @@
       <label for="contactoCuerpo" style="margin-top:12px;">Mensaje sugerido</label>
       <input type="text" id="contactoCuerpo">
 
-      <div class="modal-actions">
-        <button type="button" id="btnAbrirCorreo">Abrir correo</button>
-        <button type="button" class="btn-secondary" id="btnCopiarCorreo">Copiar correo</button>
+      <div class="modal-actions" style="flex-wrap:wrap;">
+        <button type="button" id="btnAbrirCorreo">Enviar correo</button>
+        <button type="button" class="btn-secondary" id="btnRegistrarTelefono">Marcar contactado por teléfono</button>
+        <button type="button" class="btn-secondary" id="btnCopiarContacto">Copiar datos</button>
       </div>
     </div>
   </div>
@@ -167,6 +178,7 @@
   <script>
     const TOKEN_KEY = 'serlg_user_token';
     const USER_KEY = 'serlg_user_data';
+    const ADMIN_PRINCIPAL_EMAIL = 'lunaluisronaldo@gmail.com';
 
     const adminLoginBox = document.getElementById('adminLoginBox');
     const adminPanel = document.getElementById('adminPanel');
@@ -207,12 +219,13 @@
     const contactoAsunto = document.getElementById('contactoAsunto');
     const contactoCuerpo = document.getElementById('contactoCuerpo');
     const btnAbrirCorreo = document.getElementById('btnAbrirCorreo');
-    const btnCopiarCorreo = document.getElementById('btnCopiarCorreo');
+    const btnRegistrarTelefono = document.getElementById('btnRegistrarTelefono');
+    const btnCopiarContacto = document.getElementById('btnCopiarContacto');
 
     let expedientesCache = [];
     let usuariosCache = [];
     let accionPendiente = null;
-    let correoContactoActual = '';
+    let expedienteContactoActual = null;
 
     if (btnToggleModalPass && adminPassInput) {
       btnToggleModalPass.addEventListener('click', () => {
@@ -236,6 +249,11 @@
         usuario = null;
       }
       return { token, usuario };
+    }
+
+    function soyAdminPrincipal() {
+      const { usuario } = getSesion();
+      return Boolean(usuario && usuario.esAdmin && String(usuario.correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL);
     }
 
     function limpiarSesion() {
@@ -289,47 +307,83 @@
       kpiRechazados.textContent = rechazados;
     }
 
+    async function marcarContactoEnServidor(idCandidato, medio) {
+      if (!idCandidato) return;
+      const res = await fetch(`/api/candidatos/${idCandidato}/contacto`, {
+        method: 'PUT',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ medio })
+      });
+      if (res.ok) {
+        const item = expedientesCache.find((x) => x.IdCandidato === idCandidato);
+        if (item) {
+          item.ContactoEnviado = true;
+          item.MedioContacto = medio;
+        }
+      }
+    }
+
     function abrirModalContacto(item) {
-      if (!item || !item.CorreoUsuario) {
-        mostrarAdminMensaje('Este expediente no tiene correo de usuario registrado.', true);
+      if (!item || (!item.CorreoUsuario && !item.TelefonoUsuario)) {
+        mostrarAdminMensaje('Este expediente no tiene correo ni teléfono registrado.', true);
         return;
       }
-      correoContactoActual = item.CorreoUsuario;
+      expedienteContactoActual = item;
       const obsInput = tablaExpedientes.querySelector(`input[data-obs-input="${item.IdCandidato}"]`);
       const obsActual = obsInput ? obsInput.value.trim() : (item.ObservacionAdmin || '');
 
-      contactoDestino.textContent = `Para: ${item.NombreUsuario || ''} <${item.CorreoUsuario}> — Folio #${item.IdCandidato}`;
+      const canales = [item.CorreoUsuario && `Correo: ${item.CorreoUsuario}`, item.TelefonoUsuario && `Tel: ${item.TelefonoUsuario}`]
+        .filter(Boolean)
+        .join(' | ');
+
+      contactoDestino.textContent = `${item.NombreUsuario || 'Usuario'} (${canales}) — Folio #${item.IdCandidato}`;
       contactoAsunto.value = `SER-LG | Observación en expediente #${item.IdCandidato}`;
       contactoCuerpo.value = obsActual
         ? `Hola ${item.NombreUsuario || ''}, respecto a su archivo "${item.NombreOriginal || ''}": ${obsActual}`
         : `Hola ${item.NombreUsuario || ''}, favor de revisar su archivo "${item.NombreOriginal || ''}" ya que presenta observaciones o falta información.`;
+
+      btnAbrirCorreo.style.display = item.CorreoUsuario ? 'inline-block' : 'none';
+      btnRegistrarTelefono.style.display = item.TelefonoUsuario ? 'inline-block' : 'none';
 
       modalContacto.style.display = 'flex';
     }
 
     cerrarModalContacto.addEventListener('click', () => {
       modalContacto.style.display = 'none';
+      expedienteContactoActual = null;
     });
 
     modalContacto.addEventListener('click', (e) => {
       if (e.target === modalContacto) {
         modalContacto.style.display = 'none';
+        expedienteContactoActual = null;
       }
     });
 
-    btnAbrirCorreo.addEventListener('click', () => {
-      if (!correoContactoActual) return;
-      const mailto = `mailto:${encodeURIComponent(correoContactoActual)}?subject=${encodeURIComponent(contactoAsunto.value.trim())}&body=${encodeURIComponent(contactoCuerpo.value.trim())}`;
+    btnAbrirCorreo.addEventListener('click', async () => {
+      if (!expedienteContactoActual || !expedienteContactoActual.CorreoUsuario) return;
+      await marcarContactoEnServidor(expedienteContactoActual.IdCandidato, 'correo');
+      const mailto = `mailto:${encodeURIComponent(expedienteContactoActual.CorreoUsuario)}?subject=${encodeURIComponent(contactoAsunto.value.trim())}&body=${encodeURIComponent(contactoCuerpo.value.trim())}`;
+      modalContacto.style.display = 'none';
+      mostrarAdminMensaje('Contacto por correo registrado para el usuario.', false);
       window.location.href = mailto;
     });
 
-    btnCopiarCorreo.addEventListener('click', async () => {
-      if (!correoContactoActual) return;
+    btnRegistrarTelefono.addEventListener('click', async () => {
+      if (!expedienteContactoActual) return;
+      await marcarContactoEnServidor(expedienteContactoActual.IdCandidato, 'telefono');
+      modalContacto.style.display = 'none';
+      mostrarAdminMensaje(`Contacto por teléfono (${expedienteContactoActual.TelefonoUsuario || ''}) registrado.`, false);
+    });
+
+    btnCopiarContacto.addEventListener('click', async () => {
+      if (!expedienteContactoActual) return;
+      const texto = [expedienteContactoActual.CorreoUsuario, expedienteContactoActual.TelefonoUsuario].filter(Boolean).join(' / ');
       try {
-        await navigator.clipboard.writeText(correoContactoActual);
-        mostrarAdminMensaje(`Correo copiado: ${correoContactoActual}`, false);
+        await navigator.clipboard.writeText(texto);
+        mostrarAdminMensaje(`Datos copiados: ${texto}`, false);
       } catch {
-        mostrarAdminMensaje(`Correo: ${correoContactoActual}`, false);
+        mostrarAdminMensaje(`Contacto: ${texto}`, false);
       }
     });
 
@@ -352,6 +406,7 @@
             item.NombreOriginal,
             item.NombreUsuario,
             item.CorreoUsuario,
+            item.TelefonoUsuario,
             item.ObservacionAdmin
           ]
             .filter(Boolean)
@@ -371,11 +426,19 @@
 
       filtrados.forEach((item) => {
         const tr = document.createElement('tr');
-        const usuarioLabel = item.CorreoUsuario
-          ? `${item.NombreUsuario || ''} (${item.CorreoUsuario})`.trim()
+        const contactoTexto = [item.CorreoUsuario, item.TelefonoUsuario && `Tel: ${item.TelefonoUsuario}`]
+          .filter(Boolean)
+          .join(' · ');
+        const usuarioLabel = item.NombreUsuario || contactoTexto
+          ? `${item.NombreUsuario || ''} ${contactoTexto ? `(${contactoTexto})` : ''}`.trim()
           : 'Sin usuario';
         const estaBaneado = item.EstadoUsuario === 'baneado';
         const estatusActual = item.Estatus || 'En revisión';
+        const obsTexto = (item.ObservacionAdmin || '').trim();
+        const obsBadge = obsTexto
+          ? `<div class="ok" style="margin-top:6px;font-size:13px;">Guardado: ${escapeHtml(obsTexto)}</div>`
+          : '';
+        const puedeContactar = Boolean(item.CorreoUsuario || item.TelefonoUsuario);
 
         tr.innerHTML = `
           <td>${item.IdCandidato}</td>
@@ -391,14 +454,15 @@
             </select>
           </td>
           <td>
-            <input type="text" data-obs-input="${item.IdCandidato}" value="${escapeHtml(item.ObservacionAdmin || '')}" placeholder="Ej. Falta firma o ilegible...">
+            <input type="text" data-obs-input="${item.IdCandidato}" value="${escapeHtml(obsTexto)}" placeholder="Ej. Falta firma o ilegible...">
             <button type="button" data-save-obs="${item.IdCandidato}">Guardar</button>
+            ${obsBadge}
           </td>
           <td>${escapeHtml(item.FechaFormateada || '')}</td>
           <td>
             <button type="button" data-ver-id="${item.IdCandidato}">Ver</button>
-            ${item.CorreoUsuario ? `<button type="button" data-contact-id="${item.IdCandidato}">Contactar</button>` : ''}
-            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-correo="${escapeHtml(item.CorreoUsuario || '')}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
+            ${puedeContactar ? `<button type="button" data-contact-id="${item.IdCandidato}">Contactar</button>` : ''}
+            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-correo="${escapeHtml(item.CorreoUsuario || item.TelefonoUsuario || '')}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
             <button type="button" data-del-id="${item.IdCandidato}">Eliminar</button>
           </td>
         `;
@@ -410,6 +474,7 @@
       const q = filtroUsuariosTexto.value.trim().toLowerCase();
       const rol = filtroUsuariosRol.value;
       const { usuario: actual } = getSesion();
+      const esPrincipal = soyAdminPrincipal();
 
       const filtrados = usuariosCache.filter((u) => {
         const esAdmin = Boolean(u.EsAdmin);
@@ -417,7 +482,7 @@
         if (rol === 'usuario' && esAdmin) return false;
 
         if (q) {
-          const texto = `${u.IdUsuario} ${u.Nombre || ''} ${u.Correo || ''}`.toLowerCase();
+          const texto = `${u.IdUsuario} ${u.Nombre || ''} ${u.Correo || ''} ${u.Telefono || ''}`.toLowerCase();
           if (!texto.includes(q)) return false;
         }
         return true;
@@ -426,7 +491,7 @@
       tablaUsuarios.innerHTML = '';
 
       if (filtrados.length === 0) {
-        tablaUsuarios.innerHTML = '<tr><td colspan="8">No hay usuarios que coincidan con el filtro.</td></tr>';
+        tablaUsuarios.innerHTML = '<tr><td colspan="9">No hay usuarios que coincidan con el filtro.</td></tr>';
         return;
       }
 
@@ -435,20 +500,35 @@
         const estaBaneado = u.Estado === 'baneado';
         const esAdmin = Boolean(u.EsAdmin);
         const esMiCuenta = actual && actual.idUsuario === u.IdUsuario;
+        const esObjetivoPrincipal = String(u.Correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL;
         const totalEnvios = Number(u.TotalEnvios || 0);
+
+        const botonBan = !esMiCuenta
+          ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-correo="${escapeHtml(u.Correo)}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>`
+          : '';
+
+        const botonRol = (esPrincipal && !esMiCuenta && !esObjetivoPrincipal)
+          ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-correo="${escapeHtml(u.Correo)}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>`
+          : '';
+
+        const etiquetaFija = esObjetivoPrincipal
+          ? '<span>Admin principal</span>'
+          : (esMiCuenta ? '<span>Cuenta actual</span>' : '');
 
         tr.innerHTML = `
           <td>${u.IdUsuario}</td>
           <td>${escapeHtml(u.Nombre)}</td>
           <td>${escapeHtml(u.Correo)}</td>
+          <td>${escapeHtml(u.Telefono || 'No registrado')}</td>
           <td>${totalEnvios}</td>
           <td>${escapeHtml(u.Estado)}</td>
-          <td>${esAdmin ? 'Admin' : 'Usuario'}</td>
+          <td>${esAdmin ? (esObjetivoPrincipal ? 'Admin principal' : 'Admin') : 'Usuario'}</td>
           <td>${escapeHtml(u.FechaFormateada || '')}</td>
           <td>
             <button type="button" data-ver-envios="${escapeHtml(u.Correo)}">Ver envíos</button>
-            ${!esMiCuenta ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-correo="${escapeHtml(u.Correo)}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>` : ''}
-            ${!esMiCuenta ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-correo="${escapeHtml(u.Correo)}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>` : '<span>Cuenta actual</span>'}
+            ${botonBan}
+            ${botonRol}
+            ${etiquetaFija}
           </td>
         `;
         tablaUsuarios.appendChild(tr);
@@ -528,14 +608,14 @@
     formAdminLogin.addEventListener('submit', async (e) => {
       e.preventDefault();
       mostrarAdminMensaje('', false);
-      const correo = document.getElementById('adminCorreo').value.trim();
+      const identificador = document.getElementById('adminCorreo').value.trim();
       const password = document.getElementById('adminPass').value;
 
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ correo, password })
+          body: JSON.stringify({ identificador, password })
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
@@ -621,6 +701,7 @@
         if (res.ok) {
           const item = expedientesCache.find((x) => x.IdCandidato === id);
           if (item) item.ObservacionAdmin = observacion;
+          renderizarExpedientes();
           mostrarAdminMensaje('Observación guardada.', false);
         } else {
           mostrarAdminMensaje(data.error || 'No se pudo guardar la observación.', true);
@@ -684,6 +765,10 @@
 
       const adminBtn = e.target.closest('button[data-admin-user]');
       if (adminBtn) {
+        if (!soyAdminPrincipal()) {
+          mostrarAdminMensaje('Solo el administrador principal puede gestionar permisos de admin.', true);
+          return;
+        }
         const idUsuario = adminBtn.getAttribute('data-admin-user');
         const correoUsr = adminBtn.getAttribute('data-admin-correo') || `ID #${idUsuario}`;
         const nuevoAdmin = adminBtn.getAttribute('data-admin-valor') === 'true';
