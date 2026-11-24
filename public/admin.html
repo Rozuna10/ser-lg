@@ -256,6 +256,10 @@
       return Boolean(usuario && usuario.esAdmin && String(usuario.correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL);
     }
 
+    function esCorreoAdminPrincipal(correo) {
+      return String(correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL;
+    }
+
     function limpiarSesion() {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
@@ -436,9 +440,11 @@
         const estatusActual = item.Estatus || 'En revisión';
         const obsTexto = (item.ObservacionAdmin || '').trim();
         const obsBadge = obsTexto
-          ? `<div class="ok" style="margin-top:6px;font-size:13px;">Guardado: ${escapeHtml(obsTexto)}</div>`
+          ? `<div class="obs-guardada">Guardado: ${escapeHtml(obsTexto)}</div>`
           : '';
         const puedeContactar = Boolean(item.CorreoUsuario || item.TelefonoUsuario);
+        const esPrincipal = esCorreoAdminPrincipal(item.CorreoUsuario);
+        const puedeBanearExp = Boolean(item.IdUsuario) && !esPrincipal;
 
         tr.innerHTML = `
           <td>${item.IdCandidato}</td>
@@ -462,7 +468,7 @@
           <td>
             <button type="button" data-ver-id="${item.IdCandidato}">Ver</button>
             ${puedeContactar ? `<button type="button" data-contact-id="${item.IdCandidato}">Contactar</button>` : ''}
-            ${item.IdUsuario ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-correo="${escapeHtml(item.CorreoUsuario || item.TelefonoUsuario || '')}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
+            ${puedeBanearExp ? `<button type="button" data-ban-user="${item.IdUsuario}" data-ban-correo="${escapeHtml(item.CorreoUsuario || item.TelefonoUsuario || '')}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Desbanear' : 'Banear usuario'}</button>` : ''}
             <button type="button" data-del-id="${item.IdCandidato}">Eliminar</button>
           </td>
         `;
@@ -474,7 +480,7 @@
       const q = filtroUsuariosTexto.value.trim().toLowerCase();
       const rol = filtroUsuariosRol.value;
       const { usuario: actual } = getSesion();
-      const esPrincipal = soyAdminPrincipal();
+      const esPrincipalActual = soyAdminPrincipal();
 
       const filtrados = usuariosCache.filter((u) => {
         const esAdmin = Boolean(u.EsAdmin);
@@ -500,20 +506,20 @@
         const estaBaneado = u.Estado === 'baneado';
         const esAdmin = Boolean(u.EsAdmin);
         const esMiCuenta = actual && actual.idUsuario === u.IdUsuario;
-        const esObjetivoPrincipal = String(u.Correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL;
+        const esObjetivoPrincipal = esCorreoAdminPrincipal(u.Correo);
         const totalEnvios = Number(u.TotalEnvios || 0);
 
-        const botonBan = !esMiCuenta
+        const botonBan = (!esMiCuenta && !esObjetivoPrincipal)
           ? `<button type="button" data-ban-user="${u.IdUsuario}" data-ban-correo="${escapeHtml(u.Correo)}" data-ban-estado="${estaBaneado ? 'activo' : 'baneado'}">${estaBaneado ? 'Reactivar cuenta' : 'Banear cuenta'}</button>`
           : '';
 
-        const botonRol = (esPrincipal && !esMiCuenta && !esObjetivoPrincipal)
+        const botonRol = (esPrincipalActual && !esMiCuenta && !esObjetivoPrincipal)
           ? `<button type="button" data-admin-user="${u.IdUsuario}" data-admin-correo="${escapeHtml(u.Correo)}" data-admin-valor="${esAdmin ? 'false' : 'true'}">${esAdmin ? 'Quitar admin' : 'Hacer admin'}</button>`
           : '';
 
         const etiquetaFija = esObjetivoPrincipal
-          ? '<span>Admin principal</span>'
-          : (esMiCuenta ? '<span>Cuenta actual</span>' : '');
+          ? '<span class="rol-fijo">Admin principal (protegido)</span>'
+          : (esMiCuenta ? '<span class="rol-fijo">Cuenta actual</span>' : '');
 
         tr.innerHTML = `
           <td>${u.IdUsuario}</td>
@@ -739,6 +745,11 @@
         const correoUsr = banBtn.getAttribute('data-ban-correo') || `ID #${idUsuario}`;
         const nuevoEstado = banBtn.getAttribute('data-ban-estado');
         const esBaneo = nuevoEstado === 'baneado';
+
+        if (esBaneo && esCorreoAdminPrincipal(correoUsr)) {
+          mostrarAdminMensaje('No se puede banear al administrador principal.', true);
+          return;
+        }
 
         abrirConfirmacion(
           esBaneo ? 'Banear cuenta de usuario' : 'Reactivar cuenta de usuario',

@@ -605,6 +605,18 @@ app.put('/api/usuarios/:id/estado', requerirAdmin, async (req, res) => {
 
   try {
     const pool = await getPool();
+    const targetRes = await pool.request()
+      .input('IdUsuario', sql.Int, idUsuario)
+      .query('SELECT IdUsuario, Correo FROM Usuarios WHERE IdUsuario = @IdUsuario');
+    const targetUser = targetRes.recordset[0];
+
+    if (!targetUser) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+    if (String(targetUser.Correo || '').trim().toLowerCase() === ADMIN_PRINCIPAL_EMAIL && estado === 'baneado') {
+      return res.status(400).json({ ok: false, error: 'No se puede banear al administrador principal' });
+    }
+
     await pool.request()
       .input('Estado', sql.VarChar(20), estado)
       .input('IdUsuario', sql.Int, idUsuario)
