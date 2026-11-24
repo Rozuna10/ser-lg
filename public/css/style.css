@@ -340,6 +340,15 @@ label {
   color: var(--text-main);
 }
 
+.field-note {
+  display: block;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: -4px;
+  margin-bottom: 6px;
+}
+
 .file-drop-zone {
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   border: 2px dashed #94a3b8;
@@ -381,7 +390,7 @@ input[type="file"] {
 .password-container {
   position: relative;
   width: 100%;
-  margin: 6px 0 14px;
+  margin: 4px 0 10px;
   display: flex;
   align-items: stretch;
   border-radius: 8px;
@@ -646,6 +655,31 @@ td input[data-obs-input] {
   margin-bottom: 6px;
 }
 
+.obs-guardada {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: normal;
+  max-width: 240px;
+}
+
+.rol-fijo {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
 td button,
 .btn-preview {
   width: auto;
@@ -682,12 +716,14 @@ button[data-contact-id]:hover {
   box-shadow: 0 7px 14px rgba(22, 101, 52, 0.3);
 }
 
-button[data-ban-user] {
+button[data-ban-user],
+button[data-admin-user] {
   background: linear-gradient(180deg, #d97706 0%, var(--warning) 100%);
   box-shadow: 0 4px 10px rgba(180, 83, 9, 0.22);
 }
 
-button[data-ban-user]:hover {
+button[data-ban-user]:hover,
+button[data-admin-user]:hover {
   background: linear-gradient(180deg, var(--warning) 0%, var(--warning-hover) 100%);
   box-shadow: 0 7px 14px rgba(180, 83, 9, 0.3);
 }
@@ -778,7 +814,7 @@ button[data-del-id]:hover,
 }
 
 .footer-bottom {
-  margin-top: 0;
+  margin-top: 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -789,6 +825,7 @@ button[data-del-id]:hover,
 }
 
 .footer-bottom--centered {
+  margin-top: 0;
   justify-content: center;
   gap: 24px;
   text-align: center;
